@@ -1,0 +1,6 @@
+{
+  "name": "Groupe Premium - Évaluation de Performance",
+  "description": "Plateforme digitale de revue annuelle de performance pour le Groupe Premium (BTP, Industrie, Transport, Fourniture Industrielle)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

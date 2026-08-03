@@ -1,0 +1,455 @@
+import React, { useState, useEffect } from 'react';
+import { User, Evaluation, Campagne } from '../../types';
+import { apiClient } from '../../services/apiClient';
+import { exportToPDF } from '../../utils/exportUtils';
+import { Send, CheckCircle2, Clock, Check, Download, Lock } from 'lucide-react';
+
+interface CollaborateurViewProps {
+  currentUser: User;
+  initialTab?: string;
+}
+
+const evaluationLevels = [
+  { value: 'A+', label: '100%' }, { value: 'A', label: '90%' }, { value: 'B+', label: '80%' },
+  { value: 'B', label: '70%' }, { value: 'B-', label: '50%' }, { value: 'C', label: '30%' },
+  { value: 'D', label: '10%' },
+] as const;
+
+export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUser, initialTab }) => {
+  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
+  const [activeCampaign, setActiveCampaign] = useState<Campagne | null>(null);
+  const [historyEvaluations, setHistoryEvaluations] = useState<Evaluation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'auto_eval' | 'manager_eval' | 'history'>(
+    initialTab === 'my_history' ? 'history' : 'auto_eval'
+  );
+
+  useEffect(() => {
+    if (initialTab === 'my_history') {
+      setActiveTab('history');
+    }
+  }, [initialTab]);
+
+  // Form State
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [ratings, setRatings] = useState<Record<string, string>>({});
+  const [ratingComments, setRatingComments] = useState<Record<string, string>>({});
+  const [formMessage, setFormMessage] = useState('');
+  const [formError, setFormError] = useState('');
+
+  useEffect(() => {
+    Promise.all([
+      apiClient.getEvaluations({ user_id: currentUser.id.toString() }),
+      apiClient.getCampaigns()
+    ]).then(([evalRes, campRes]) => {
+      setHistoryEvaluations(evalRes.filter(review =>
+        review.score_global > 0 && (review.status === 'valide' || review.status === 'soumis_dg'),
+      ));
+      const openCamp = campRes.find((campaign: Campagne) =>
+        campaign.status === 'ouverte' &&
+        evalRes.some(review => review.campagne_id === campaign.id),
+      );
+      const currentEvaluation = openCamp
+        ? evalRes.find(review => review.campagne_id === openCamp.id)
+        : evalRes[0];
+
+      if (currentEvaluation) {
+        const ev = currentEvaluation;
+        setEvaluation(ev);
+        if (ev.auto_evaluation) {
+          setRatings(ev.auto_evaluation.ratings || {});
+          setRatingComments(ev.auto_evaluation.comments || {});
+          const savedRatings = ev.auto_evaluation.ratings || {};
+          setIsSubmitted(ev.competences.length > 0 && ev.competences.every(competence => Boolean(savedRatings[String(competence.id)])));
+        }
+      }
+      setActiveCampaign(openCamp || null);
+      setLoading(false);
+    }).catch(console.error);
+  }, [currentUser]);
+
+  const handleSubmitAutoEval = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!evaluation || !activeCampaign || activeCampaign.status !== 'ouverte' || evaluation.campagne_id !== activeCampaign.id) {
+      alert('La campagne doit être lancée par la DRH avant de pouvoir remplir cette auto-évaluation.');
+      return;
+    }
+    if (evaluation.competences.some(competence => !ratings[String(competence.id)])) {
+      setFormError('Certains critères ne sont pas encore cochés. Ils sont signalés en rouge ci-dessous.');
+      return;
+    }
+    try {
+      setFormError('');
+      const result = await apiClient.submitAutoEvaluation(evaluation.id, { ratings, comments: ratingComments });
+      setEvaluation(result.evaluation);
+      setIsSubmitted(true);
+      setFormMessage(`Votre fiche a été validée et envoyée automatiquement à ${evaluation.manager_name}.`);
+    } catch (error: any) {
+      setFormError(error.message || 'La transmission au manager a échoué.');
+    }
+  };
+
+  const handleSign = async () => {
+    if (!evaluation) return;
+    const res = await apiClient.signEvaluation(evaluation.id);
+    setEvaluation(res.evaluation);
+    alert('Vous avez pris connaissance et signé votre évaluation annuelle.');
+  };
+
+  const handleConfirmCorrection = async () => {
+    if (!evaluation) return;
+    try {
+      const result = await apiClient.confirmCorrection(evaluation.id);
+      setEvaluation(result.evaluation);
+      alert(result.message);
+    } catch (error: any) {
+      alert(error.message || 'La confirmation a échoué.');
+    }
+  };
+
+  if (loading) {
+    return <div className="p-8 text-center text-slate-500">Chargement de votre dossier...</div>;
+  }
+
+  const isCampaignOpen = activeCampaign && activeCampaign.status === 'ouverte';
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto">
+      {/* Top Welcome Header */}
+      <div className="bg-gradient-to-r from-blue-900 to-slate-900 text-white p-6 rounded-2xl shadow-lg flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center space-x-4">
+          <div className="w-14 h-14 rounded-full bg-blue-800 text-white font-black text-lg flex items-center justify-center border-2 border-blue-400 shadow-md shrink-0">
+            {currentUser.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
+          </div>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-300 bg-blue-500/20 px-2.5 py-0.5 rounded-full">
+              Espace Collaborateur
+            </span>
+            <h1 className="text-xl font-black mt-1">Bienvenue, {currentUser.name}</h1>
+            <p className="text-xs text-slate-300">{currentUser.poste_name} • {currentUser.filiale_name}</p>
+          </div>
+        </div>
+ 
+        {activeCampaign ? (
+          <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 text-center text-xs">
+            <div className="text-slate-300">Statut Campagne DRH</div>
+            <div className="font-bold text-emerald-400 flex items-center justify-center space-x-1.5 mt-0.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>{activeCampaign.name} (Ouverte)</span>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 text-center text-xs">
+            <div className="text-slate-300">Statut Campagne DRH</div>
+            <div className="font-bold text-amber-300 flex items-center justify-center space-x-1.5 mt-0.5">
+              <Lock className="w-3.5 h-3.5 text-amber-300" />
+              <span>Aucune campagne active</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="bg-white p-1.5 rounded-xl border border-slate-200/80 shadow-sm flex space-x-2 text-xs font-bold">
+        <button
+          onClick={() => setActiveTab('auto_eval')}
+          className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'auto_eval' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          1. Mon Auto-évaluation
+        </button>
+        <button
+          onClick={() => setActiveTab('manager_eval')}
+          className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'manager_eval' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          2. Évaluation du Manager & Score
+        </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'history' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          3. Historique mes Revues
+        </button>
+      </div>
+
+      {/* TAB 1: Auto-evaluation form */}
+      {activeTab === 'auto_eval' && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="font-bold text-base text-slate-900">Formulaire d'Auto-évaluation Annuelle</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Complétez votre bilan de l'année dès l'ouverture de la campagne par la DRH.</p>
+            </div>
+            {isSubmitted && (
+              <span className="px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full flex items-center space-x-1">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Auto-évaluation Transmise</span>
+              </span>
+            )}
+          </div>
+
+          {!isCampaignOpen ? (
+            /* Banner when DRH has NOT launched a campaign yet */
+            <div className="bg-amber-50/90 border-2 border-amber-200 rounded-2xl p-8 text-center space-y-4 shadow-xs">
+              <div className="w-14 h-14 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center mx-auto font-black">
+                <Lock className="w-7 h-7 text-amber-700" />
+              </div>
+              <div className="max-w-lg mx-auto space-y-2">
+                <h3 className="font-black text-base text-amber-950">
+                  Aucune campagne d'évaluation n'est actuellement ouverte par la DRH
+                </h3>
+                <p className="text-xs text-amber-900 leading-relaxed font-medium">
+                  Le formulaire d'auto-évaluation reste temporairement indisponible. Dès que la Direction RH aura officiellement lancé une campagne, vous recevrez une notification et les champs de saisie seront débloqués.
+                </p>
+                <div className="pt-2">
+                  <span className="inline-flex items-center space-x-2 px-4 py-1.5 bg-amber-200/80 text-amber-950 font-bold text-xs rounded-full border border-amber-300">
+                    <Clock className="w-3.5 h-3.5 text-amber-800" />
+                    <span>En attente du lancement DRH</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Form available when campaign IS open */
+            <div className="space-y-6">
+              {/* Campaign Launch Alert Banner */}
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center space-x-3 text-emerald-900 text-xs font-semibold">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <div>
+                  <strong>Campagne Lancée par la DRH : {activeCampaign.name}</strong>
+                  <p className="text-[11px] text-emerald-800 font-normal mt-0.5">
+                    Vous êtes autorisé(e) à remplir votre auto-évaluation. Date limite fixée au <strong>{activeCampaign.auto_eval_deadline}</strong>.
+                  </p>
+                </div>
+              </div>
+
+              {isSubmitted ? (
+                <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-8 text-center space-y-4">
+                  <div className="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
+                    <Lock className="w-7 h-7 text-emerald-800" />
+                  </div>
+                  <div className="max-w-xl mx-auto space-y-2">
+                    <h3 className="font-black text-base text-slate-950">Auto-évaluation validée et verrouillée</h3>
+                    <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                      Votre fiche complète a été envoyée automatiquement à <strong>{evaluation.manager_name}</strong>. Vous ne pouvez plus modifier vos réponses. Votre manager peut maintenant consulter vos résultats, planifier l’entretien et compléter sa propre notation.
+                    </p>
+                    <span className="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-100 text-emerald-900 font-bold text-xs rounded-full border border-emerald-300">
+                      <CheckCircle2 className="w-4 h-4" /> Transmission terminée
+                    </span>
+                  </div>
+                </div>
+              ) : (
+              <form onSubmit={handleSubmitAutoEval} className="space-y-5 text-xs">
+                {formMessage && <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 font-bold text-emerald-900">{formMessage}</div>}
+                {formError && <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 font-bold text-rose-900">{formError}</div>}
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-950">
+                  Cochez un seul pourcentage pour chaque critère : 100 %, 90 %, 80 %, 70 %, 50 %, 30 % ou 10 %.
+                  <strong className="block mt-1">Progression : {Object.keys(ratings).filter(id => evaluation.competences.some(item => String(item.id) === id)).length} / {evaluation.competences.length} critères cochés.</strong>
+                </div>
+
+                {(['savoir', 'savoir_faire', 'savoir_etre'] as const).map(axis => {
+                  const axisItems = evaluation?.competences.filter(competence => competence.axe === axis) || [];
+                  if (axisItems.length === 0) return null;
+                  const title = axis === 'savoir' ? 'Savoir (20 %)' : axis === 'savoir_faire' ? 'Savoir-faire (50 %)' : 'Savoir-être (30 %)';
+                  return (
+                    <section key={axis} className="space-y-2">
+                      <h3 className="font-black text-sm text-slate-900 border-b border-slate-200 pb-2">{title}</h3>
+                      {axisItems.map(competence => (
+                        <div key={competence.id} className={`grid grid-cols-1 lg:grid-cols-[minmax(220px,1fr)_minmax(360px,auto)] gap-3 items-center p-3 border-b ${formError && !ratings[String(competence.id)] ? 'border-rose-300 bg-rose-50' : 'border-slate-100'}`}>
+                          <div>
+                            <div className="font-bold text-slate-900">{competence.name}</div>
+                            {competence.description && <div className="text-[11px] text-slate-500">{competence.description}</div>}
+                          </div>
+                          <div className="space-y-2">
+                          <div className="flex flex-wrap gap-1.5">
+                            {evaluationLevels.map(level => (
+                              <label key={level.value} className={`cursor-pointer px-2.5 py-1.5 rounded-lg border font-black transition-colors ${ratings[String(competence.id)] === level.value ? 'bg-blue-900 text-white border-blue-900' : 'bg-white text-slate-700 border-slate-300 hover:border-blue-500'} ${isSubmitted ? 'pointer-events-none opacity-80' : ''}`}>
+                                <input
+                                  type="radio"
+                                  name={`rating-${competence.id}`}
+                                  value={level.value}
+                                  checked={ratings[String(competence.id)] === level.value}
+                                  onChange={() => {
+                                    setRatings(current => ({ ...current, [String(competence.id)]: level.value }));
+                                    setFormError('');
+                                  }}
+                                  className="sr-only"
+                                  disabled={isSubmitted}
+                                />
+                                {level.label}
+                              </label>
+                            ))}
+                          </div>
+                          <textarea
+                            rows={2}
+                            value={ratingComments[String(competence.id)] || ''}
+                            onChange={event => setRatingComments(current => ({ ...current, [String(competence.id)]: event.target.value }))}
+                            placeholder="Commentaire ou justification de votre niveau (facultatif)"
+                            className="w-full min-w-0 p-2 rounded-lg border border-slate-300 bg-white text-[11px]"
+                          />
+                          </div>
+                        </div>
+                      ))}
+                    </section>
+                  );
+                })}
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="submit"
+                disabled={isSubmitted}
+                className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-400 text-white font-bold text-xs rounded-xl shadow-md flex items-center space-x-2"
+              >
+                <Send className="w-4 h-4" />
+                <span>Valider et Transmettre à mon Manager</span>
+              </button>
+            </div>
+          </form>
+              )}
+        </div>
+      )}
+        </div>
+      )}
+
+      {/* TAB 2: View Manager's Evaluation & Sign */}
+      {activeTab === 'manager_eval' && evaluation && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="font-bold text-base text-slate-900">Évaluation Complétée par votre Manager</h2>
+              <p className="text-xs text-slate-500">Manager: {evaluation.manager_name}</p>
+            </div>
+
+            <div className="text-right">
+              <div className="text-[10px] text-slate-400 uppercase font-bold">Score Global Réalisé</div>
+              <div className="text-2xl font-black text-emerald-800">{evaluation.score_global} / 100</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div className="p-4 bg-slate-50 rounded-xl border">
+              <div className="font-bold text-slate-500">Savoir (20%)</div>
+              <div className="text-xl font-black text-slate-900 mt-1">{evaluation.score_savoir} / 100</div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-xl border">
+              <div className="font-bold text-slate-500">Savoir-faire (50%)</div>
+              <div className="text-xl font-black text-slate-900 mt-1">{evaluation.score_savoir_faire} / 100</div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-xl border">
+              <div className="font-bold text-slate-500">Savoir-être (30%)</div>
+              <div className="text-xl font-black text-slate-900 mt-1">{evaluation.score_savoir_etre} / 100</div>
+            </div>
+          </div>
+
+          <div className="p-4 bg-slate-50 rounded-xl border space-y-2 text-xs">
+            <div className="font-bold text-slate-900">Appréciation de votre Manager :</div>
+            <p className="text-slate-700 italic">{evaluation.summary_comment || 'Aucun commentaire renseigné.'}</p>
+          </div>
+
+          {evaluation.status === 'a_corriger' && (
+            <div className="p-5 bg-amber-50 border border-amber-300 rounded-2xl space-y-3">
+              <div>
+                <div className="font-black text-sm text-amber-950">Dossier renvoyé par la DG</div>
+                <p className="text-xs text-amber-900 mt-1">Motif : {evaluation.dg_comment || 'Corrections demandées.'}</p>
+              </div>
+              {evaluation.manager_correction_submitted_at ? (
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <p className="text-xs font-semibold text-emerald-900">Le manager a terminé les corrections. Confirmez pour transmettre directement le dossier à la DG.</p>
+                  <button onClick={handleConfirmCorrection} className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl">
+                    Confirmer et envoyer à la DG
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs font-semibold text-amber-800">Votre manager a été informé. Le bouton de confirmation apparaîtra après ses corrections.</p>
+              )}
+            </div>
+          )}
+
+          {/* Signature / Prise de Connaissance */}
+          <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
+            <div>
+              <div className="font-bold text-xs text-emerald-900">Signature & Prise de Connaissance</div>
+              <div className="text-[11px] text-emerald-700 mt-0.5">
+                {evaluation.signed_at_user ? `Signé le ${evaluation.signed_at_user}` : 'Veuillez confirmer que vous avez pris connaissance de votre évaluation.'}
+              </div>
+            </div>
+
+            {!evaluation.signed_at_user ? (
+              <button
+                onClick={handleSign}
+                className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow-md flex items-center space-x-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>Signer l'Évaluation</span>
+              </button>
+            ) : (
+              <span className="px-3 py-1 bg-emerald-200 text-emerald-900 font-extrabold text-xs rounded-full flex items-center space-x-1">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Signé & Enregistré</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: History */}
+      {activeTab === 'history' && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div>
+              <h2 className="font-bold text-base text-slate-900">Historique de vos Revues & Évaluations Annuelles</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Consultez et téléchargez vos archives de performance au sein du Groupe Premium.</p>
+            </div>
+            {historyEvaluations.length > 0 && (
+              <button
+                onClick={() => {
+                  const headers = ['Campagne', 'Manager', 'Savoir (20%)', 'Savoir-Faire (50%)', 'Savoir-Être (30%)', 'Note Globale', 'Statut'];
+                  const rows = historyEvaluations.map(item => [item.campagne_name, item.manager_name, `${item.score_savoir}/100`, `${item.score_savoir_faire}/100`, `${item.score_savoir_etre}/100`, `${item.score_global}/100`, item.status.toUpperCase()]);
+                  exportToPDF(`Historique_Revues_${currentUser.name}`, headers, rows, 'historique_collaborateur');
+                }}
+                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow flex items-center space-x-1.5"
+              >
+                <Download className="w-4 h-4 text-emerald-400" />
+                <span>Télécharger Relevé PDF</span>
+              </button>
+            )}
+          </div>
+
+          <div className="divide-y divide-slate-200 border-y border-slate-200">
+            {historyEvaluations.length === 0 && (
+              <div className="py-12 text-center text-sm text-slate-500">
+                Aucun historique disponible. Une évaluation apparaîtra ici après sa saisie et sa validation.
+              </div>
+            )}
+            {historyEvaluations.map(item => (
+              <div key={item.id} className="p-5 hover:bg-blue-50/40 space-y-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="px-2.5 py-0.5 bg-blue-100 text-blue-900 font-extrabold text-[10px] rounded-full uppercase">
+                      Évaluation enregistrée
+                    </span>
+                    <h3 className="font-bold text-sm text-slate-900 mt-1">{item.campagne_name}</h3>
+                    <p className="text-xs text-slate-500">Manager Évaluateur : {item.manager_name}</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Score Global</div>
+                    <div className="text-xl font-black text-emerald-800">
+                      {item.score_global} / 100
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200/60 text-xs text-slate-600">
+                  <div>Savoir : <strong>{item.score_savoir}/100</strong></div>
+                  <div>Savoir-faire : <strong>{item.score_savoir_faire}/100</strong></div>
+                  <div>Savoir-être : <strong>{item.score_savoir_etre}/100</strong></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

@@ -454,6 +454,31 @@ export function setupApiRoutes(app: Express) {
     res.json(currentCampagnes[index]);
   });
 
+  app.delete('/api/campaigns/:id', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id, 10);
+    const index = currentCampagnes.findIndex(c => c.id === id);
+    if (index === -1) return res.status(404).json({ error: 'Campagne introuvable' });
+
+    const [deletedCampaign] = currentCampagnes.splice(index, 1);
+    const evaluationsToDelete = currentEvaluations.filter(e => e.campagne_id === id);
+    for (const evaluation of evaluationsToDelete) {
+      await evaluationRepository.delete(evaluation.id);
+    }
+    currentEvaluations = currentEvaluations.filter(e => e.campagne_id !== id);
+
+    const currentUser = getUserFromReq(req);
+    currentAuditLogs.unshift({
+      id: currentAuditLogs.length + 1,
+      campagne_id: deletedCampaign.id,
+      campagne_name: deletedCampaign.name,
+      user_name: `${currentUser?.name || 'Direction RH'}`,
+      action: 'Suppression de la campagne et des évaluations associées',
+      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
+    });
+
+    res.json({ message: 'Campagne supprimée avec succès.' });
+  });
+
   app.post('/api/campaigns/:id/launch', async (req: Request, res: Response) => {
     const id = parseInt(req.params.id, 10);
     const campagne = currentCampagnes.find(c => c.id === id);
@@ -510,7 +535,7 @@ export function setupApiRoutes(app: Express) {
       currentNotifications.unshift({
         id: currentNotifications.length + 1,
         user_id: c.id,
-        title: `🚀 Lancement de la Campagne d'Évaluation ${campagne.year}`,
+        title: `Lancement de la campagne d'évaluation ${campagne.year}`,
         message: `La campagne "${campagne.name}" a été lancée par la DRH pour votre département. ${campagne.description} Vous pouvez remplir votre auto-évaluation. Consignes : ${campagne.regles_evaluations || ''}`,
         read: false,
         type: 'campaign_launch',
@@ -882,26 +907,26 @@ export function setupApiRoutes(app: Express) {
     if (!requireManager(req, res)) return;
     const id = parseInt(req.params.id, 10);
     const evaluation = currentEvaluations.find(e => e.id === id);
-    if (!evaluation) return res.status(404).json({ error: 'Évaluation non trouvée' });
+    if (!evaluation) return res.status(404).json({ error: 'Evaluation non trouvee' });
     if (evaluation.competences.length === 0 || evaluation.competences.some(competence => Number(competence.score) <= 0)) {
-      return res.status(400).json({ error: 'Tous les critères Savoir, Savoir-faire et Savoir-être doivent être notés avant la soumission.' });
+      return res.status(400).json({ error: 'Tous les criteres doivent etre notes avant la soumission.' });
     }
 
     evaluation.status = 'soumis_dg';
 
-    // Platform notification to collaborator ONLY (as per requirements: "Aucun email n'est envoyé au collaborateur à cette étape")
-    currentNotifications.unshift({
+    const dgRecipients = currentUsers.filter(user => user.role === 'dg' && (!evaluation.direction_name || user.direction_name === evaluation.direction_name));
+    dgRecipients.forEach(dg => currentNotifications.unshift({
       id: currentNotifications.length + 1,
-      user_id: evaluation.user_id,
-      title: 'Évaluation Manager Finalisée',
-      message: `Votre entretien de performance pour la campagne ${evaluation.campagne_name} a été complété par votre manager ${evaluation.manager_name}.`,
+      user_id: dg.id,
+      title: 'Evaluation a valider',
+      message: `Le dossier de ${evaluation.user_name} a ete transmis a la Direction Generale par ${evaluation.manager_name}.`,
       read: false,
       type: 'eval_submitted',
       created_at: new Date().toISOString().split('T')[0]
-    });
+    }));
 
     await evaluationRepository.update(id, evaluation);
-    res.json({ message: 'Évaluation transmise à la Direction Générale', evaluation });
+    res.json({ message: 'Evaluation transmise a la Direction Generale', evaluation });
   });
 
   app.post('/api/evaluations/:id/submit-correction', async (req: Request, res: Response) => {
@@ -913,6 +938,7 @@ export function setupApiRoutes(app: Express) {
     if (evaluation.competences.some(competence => Number(competence.score) <= 0)) {
       return res.status(400).json({ error: 'Terminez toutes les notes avant de demander la confirmation du collaborateur.' });
     }
+    evaluation.status = 'correction_a_confirmer';
     evaluation.manager_correction_submitted_at = new Date().toISOString();
     await evaluationRepository.update(id, evaluation);
     currentNotifications.unshift({
@@ -924,34 +950,49 @@ export function setupApiRoutes(app: Express) {
       type: 'eval_submitted',
       created_at: new Date().toISOString().split('T')[0]
     });
-    res.json({ message: 'Corrections terminées. Le collaborateur a été notifié.', evaluation });
+    const dgRecipients = currentUsers.filter(user =>
+      user.role === 'dg' &&
+      (
+        (!evaluation.direction_name && !evaluation.filiale_name) ||
+        user.direction_name === evaluation.direction_name ||
+        user.filiale_name === evaluation.filiale_name
+      )
+    );
+    dgRecipients.forEach(dg => currentNotifications.unshift({
+      id: currentNotifications.length + 1,
+      user_id: dg.id,
+      title: 'Correction terminee par le manager',
+      message: `Le manager ${evaluation.manager_name} a termine la verification et les corrections du dossier de ${evaluation.user_name}. Le dossier sera disponible pour validation finale apres signature du collaborateur.`,
+      read: false,
+      type: 'correction_ready',
+      created_at: new Date().toISOString().split('T')[0]
+    }));
+    res.json({ message: 'Corrections terminees. Le collaborateur et le DG concerne ont ete notifies.', evaluation });
   });
 
   app.post('/api/evaluations/:id/confirm-correction', async (req: Request, res: Response) => {
     const user = getUserFromReq(req);
     const id = parseInt(req.params.id, 10);
     const evaluation = currentEvaluations.find(item => item.id === id);
-    if (!evaluation) return res.status(404).json({ error: 'Évaluation non trouvée' });
+    if (!evaluation) return res.status(404).json({ error: 'Evaluation non trouvee' });
     if (!user || user.role !== 'collaborateur' || user.id !== evaluation.user_id) {
-      return res.status(403).json({ error: 'Confirmation réservée au collaborateur concerné.' });
+      return res.status(403).json({ error: 'Confirmation reservee au collaborateur concerne.' });
     }
-    if (evaluation.status !== 'a_corriger' || !evaluation.manager_correction_submitted_at) {
-      return res.status(409).json({ error: 'Les corrections du manager ne sont pas encore terminées.' });
+    if (evaluation.status !== 'correction_a_confirmer' || !evaluation.manager_correction_submitted_at) {
+      return res.status(409).json({ error: 'Les corrections du manager ne sont pas encore terminees.' });
     }
-    evaluation.status = 'soumis_dg';
     evaluation.correction_confirmed_at = new Date().toISOString();
     await evaluationRepository.update(id, evaluation);
-    const recipients = currentUsers.filter(item => item.role === 'dg' || item.id === evaluation.manager_id);
-    recipients.forEach(recipient => currentNotifications.unshift({
+    currentNotifications.unshift({
       id: currentNotifications.length + 1,
-      user_id: recipient.id,
-      title: 'Dossier corrigé confirmé par le collaborateur',
-      message: `${evaluation.user_name} a confirmé le dossier corrigé. Il est transmis à la DG pour validation finale.`,
+      user_id: evaluation.manager_id,
+      title: 'Correction confirmee par le collaborateur',
+      message: `${evaluation.user_name} a confirme la correction. Le dossier attend sa signature avant transmission a la DG.`,
       read: false,
       type: 'eval_submitted',
       created_at: new Date().toISOString().split('T')[0]
-    }));
-    res.json({ message: 'Confirmation enregistrée. Dossier envoyé à la DG pour validation finale.', evaluation });
+    });
+    res.json({ message: 'Confirmation enregistree. Le dossier attend la signature du collaborateur.', evaluation });
   });
 
   // Collaborator submits auto-evaluation
@@ -1038,11 +1079,32 @@ export function setupApiRoutes(app: Express) {
   app.post('/api/evaluations/:id/sign', async (req: Request, res: Response) => {
     const id = parseInt(req.params.id, 10);
     const evaluation = currentEvaluations.find(e => e.id === id);
-    if (!evaluation) return res.status(404).json({ error: 'Évaluation non trouvée' });
+    if (!evaluation) return res.status(404).json({ error: 'Evaluation non trouvee' });
 
+    const previousStatus = evaluation.status;
     evaluation.signed_at_user = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    evaluation.status = 'signee';
+    {
+      const dgRecipients = currentUsers.filter(user =>
+        user.role === 'dg' &&
+        (
+          (!evaluation.direction_name && !evaluation.filiale_name) ||
+          user.direction_name === evaluation.direction_name ||
+          user.filiale_name === evaluation.filiale_name
+        )
+      );
+      dgRecipients.forEach(dg => currentNotifications.unshift({
+        id: currentNotifications.length + 1,
+        user_id: dg.id,
+        title: previousStatus === 'correction_a_confirmer' ? 'Dossier corrige a valider' : 'Dossier signe a valider',
+        message: `${evaluation.user_name} a signe son evaluation. Le dossier est pret pour la validation finale.`,
+        read: false,
+        type: 'eval_submitted',
+        created_at: new Date().toISOString().split('T')[0]
+      }));
+    }
     await evaluationRepository.update(id, evaluation);
-    res.json({ message: 'Évaluation signée avec succès', evaluation });
+    res.json({ message: 'Evaluation signee avec succes', evaluation });
   });
 
   // DG validates or rejects evaluation
@@ -1057,6 +1119,17 @@ export function setupApiRoutes(app: Express) {
       evaluation.status = 'valide';
       evaluation.validated_at_dg = new Date().toISOString().split('T')[0];
       evaluation.dg_comment = comment || 'Validé par la Direction Générale';
+      const rhRecipients = currentUsers.filter(user => user.role === 'rh').map(user => user.id);
+      const finalRecipients = Array.from(new Set([evaluation.manager_id, evaluation.user_id, ...rhRecipients].filter(Boolean)));
+      finalRecipients.forEach(userId => currentNotifications.unshift({
+        id: currentNotifications.length + 1,
+        user_id: userId,
+        title: 'Evaluation validee definitivement',
+        message: `L evaluation de ${evaluation.user_name} a ete validee definitivement par la Direction Generale. Le processus est termine.`,
+        read: false,
+        type: 'evaluation_validated',
+        created_at: new Date().toISOString().split('T')[0]
+      }));
     } else {
       evaluation.status = 'a_corriger';
       evaluation.dg_comment = comment || 'Ajustements demandés par la Direction Générale';

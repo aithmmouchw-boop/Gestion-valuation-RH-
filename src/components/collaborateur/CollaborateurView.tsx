@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { User, Evaluation, Campagne } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { exportToPDF } from '../../utils/exportUtils';
@@ -7,6 +7,7 @@ import { Send, CheckCircle2, Clock, Check, Download, Lock } from 'lucide-react';
 interface CollaborateurViewProps {
   currentUser: User;
   initialTab?: string;
+  onNavigateTab?: (tab: string) => void;
 }
 
 const evaluationLevels = [
@@ -15,7 +16,15 @@ const evaluationLevels = [
   { value: 'D', label: '10%' },
 ] as const;
 
-export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUser, initialTab }) => {
+const normalizeAxis = (axis?: string) => {
+  const value = (axis || '').toLowerCase().replace(/[-\s]/g, '_');
+  if (value.includes('faire')) return 'savoir_faire';
+  if (value.includes('etre') || value.includes('être')) return 'savoir_etre';
+  if (value.includes('savoir')) return 'savoir';
+  return 'autres';
+};
+
+export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUser, initialTab, onNavigateTab }) => {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [activeCampaign, setActiveCampaign] = useState<Campagne | null>(null);
   const [historyEvaluations, setHistoryEvaluations] = useState<Evaluation[]>([]);
@@ -27,15 +36,24 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
   useEffect(() => {
     if (initialTab === 'my_history') {
       setActiveTab('history');
+    } else if (initialTab === 'my_eval' || initialTab === 'collab_eval') {
+      setActiveTab('auto_eval');
     }
   }, [initialTab]);
+
+  const selectCollaborateurTab = (tab: 'auto_eval' | 'manager_eval' | 'history') => {
+    setActiveTab(tab);
+    onNavigateTab?.(tab === 'history' ? 'my_history' : 'my_eval');
+  };
 
   // Form State
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [ratings, setRatings] = useState<Record<string, string>>({});
   const [ratingComments, setRatingComments] = useState<Record<string, string>>({});
+  const [selfReview, setSelfReview] = useState({ balance: '', achievements: '', difficulties: '', aspirations: '' });
   const [formMessage, setFormMessage] = useState('');
   const [formError, setFormError] = useState('');
+  const [submittingAutoEval, setSubmittingAutoEval] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -43,7 +61,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
       apiClient.getCampaigns()
     ]).then(([evalRes, campRes]) => {
       setHistoryEvaluations(evalRes.filter(review =>
-        review.score_global > 0 && (review.status === 'valide' || review.status === 'soumis_dg'),
+        review.score_global > 0 && (review.status === 'valide' || review.status === 'soumis_dg' || review.status === 'signee'),
       ));
       const openCamp = campRes.find((campaign: Campagne) =>
         campaign.status === 'ouverte' &&
@@ -59,6 +77,12 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
         if (ev.auto_evaluation) {
           setRatings(ev.auto_evaluation.ratings || {});
           setRatingComments(ev.auto_evaluation.comments || {});
+          setSelfReview({
+            balance: ev.auto_evaluation.balance || '',
+            achievements: ev.auto_evaluation.achievements || '',
+            difficulties: ev.auto_evaluation.difficulties || '',
+            aspirations: ev.auto_evaluation.aspirations || '',
+          });
           const savedRatings = ev.auto_evaluation.ratings || {};
           setIsSubmitted(ev.competences.length > 0 && ev.competences.every(competence => Boolean(savedRatings[String(competence.id)])));
         }
@@ -70,6 +94,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
 
   const handleSubmitAutoEval = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingAutoEval || isSubmitted) return;
     if (!evaluation || !activeCampaign || activeCampaign.status !== 'ouverte' || evaluation.campagne_id !== activeCampaign.id) {
       alert('La campagne doit être lancée par la DRH avant de pouvoir remplir cette auto-évaluation.');
       return;
@@ -78,14 +103,25 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
       setFormError('Certains critères ne sont pas encore cochés. Ils sont signalés en rouge ci-dessous.');
       return;
     }
+    if (evaluation.competences.some(competence => !ratingComments[String(competence.id)]?.trim())) {
+      setFormError('Ajoutez un commentaire ou une justification pour chaque critère avant de valider.');
+      return;
+    }
+    if ((Object.keys(selfReview) as Array<keyof typeof selfReview>).some(field => !selfReview[field].trim())) {
+      setFormError("Complétez le bilan de l'année, les réalisations, les difficultés et les aspirations avant de valider.");
+      return;
+    }
     try {
       setFormError('');
-      const result = await apiClient.submitAutoEvaluation(evaluation.id, { ratings, comments: ratingComments });
+      setSubmittingAutoEval(true);
+      const result = await apiClient.submitAutoEvaluation(evaluation.id, { ...selfReview, ratings, comments: ratingComments });
       setEvaluation(result.evaluation);
       setIsSubmitted(true);
       setFormMessage(`Votre fiche a été validée et envoyée automatiquement à ${evaluation.manager_name}.`);
     } catch (error: any) {
       setFormError(error.message || 'La transmission au manager a échoué.');
+    } finally {
+      setSubmittingAutoEval(false);
     }
   };
 
@@ -93,7 +129,9 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
     if (!evaluation) return;
     const res = await apiClient.signEvaluation(evaluation.id);
     setEvaluation(res.evaluation);
-    alert('Vous avez pris connaissance et signé votre évaluation annuelle.');
+    alert(evaluation.status === 'correction_a_confirmer'
+      ? 'Vous avez signé la correction. Le dossier a été transmis à la Direction Générale pour validation finale.'
+      : 'Vous avez pris connaissance et signé votre évaluation annuelle.');
   };
 
   const handleConfirmCorrection = async () => {
@@ -152,19 +190,19 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
       {/* Tabs */}
       <div className="bg-white p-1.5 rounded-xl border border-slate-200/80 shadow-sm flex space-x-2 text-xs font-bold">
         <button
-          onClick={() => setActiveTab('auto_eval')}
+          onClick={() => selectCollaborateurTab('auto_eval')}
           className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'auto_eval' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
         >
-          1. Mon Auto-évaluation
+          Mon auto-évaluation
         </button>
         <button
-          onClick={() => setActiveTab('manager_eval')}
+          onClick={() => selectCollaborateurTab('manager_eval')}
           className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'manager_eval' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
         >
           2. Évaluation du Manager & Score
         </button>
         <button
-          onClick={() => setActiveTab('history')}
+          onClick={() => selectCollaborateurTab('history')}
           className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'history' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
         >
           3. Historique mes Revues
@@ -176,13 +214,13 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
         <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-6">
           <div className="flex items-center justify-between pb-4 border-b border-slate-100">
             <div>
-              <h2 className="font-bold text-base text-slate-900">Formulaire d'Auto-évaluation Annuelle</h2>
+              <h2 className="font-bold text-base text-slate-900">Formulaire d'auto-évaluation annuelle</h2>
               <p className="text-xs text-slate-500 mt-0.5">Complétez votre bilan de l'année dès l'ouverture de la campagne par la DRH.</p>
             </div>
             {isSubmitted && (
               <span className="px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full flex items-center space-x-1">
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Auto-évaluation Transmise</span>
+                <span>Auto-évaluation transmise</span>
               </span>
             )}
           </div>
@@ -212,7 +250,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
             /* Form available when campaign IS open */
             <div className="space-y-6">
               {/* Campaign Launch Alert Banner */}
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center space-x-3 text-emerald-900 text-xs font-semibold">
+              {!isSubmitted && <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center space-x-3 text-emerald-900 text-xs font-semibold">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <div>
                   <strong>Campagne Lancée par la DRH : {activeCampaign.name}</strong>
@@ -220,20 +258,20 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                     Vous êtes autorisé(e) à remplir votre auto-évaluation. Date limite fixée au <strong>{activeCampaign.auto_eval_deadline}</strong>.
                   </p>
                 </div>
-              </div>
+              </div>}
 
               {isSubmitted ? (
-                <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-8 text-center space-y-4">
-                  <div className="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
-                    <Lock className="w-7 h-7 text-emerald-800" />
+                <div className="bg-amber-50/90 border-2 border-amber-200 rounded-2xl p-8 text-center space-y-4 shadow-xs">
+                  <div className="w-14 h-14 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center mx-auto font-black">
+                    <Lock className="w-7 h-7 text-amber-700" />
                   </div>
                   <div className="max-w-xl mx-auto space-y-2">
-                    <h3 className="font-black text-base text-slate-950">Auto-évaluation validée et verrouillée</h3>
-                    <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                    <h3 className="font-black text-base text-amber-950">Auto-évaluation validée et verrouillée</h3>
+                    <p className="text-xs text-amber-900 leading-relaxed font-medium">
                       Votre fiche complète a été envoyée automatiquement à <strong>{evaluation.manager_name}</strong>. Vous ne pouvez plus modifier vos réponses. Votre manager peut maintenant consulter vos résultats, planifier l’entretien et compléter sa propre notation.
                     </p>
-                    <span className="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-100 text-emerald-900 font-bold text-xs rounded-full border border-emerald-300">
-                      <CheckCircle2 className="w-4 h-4" /> Transmission terminée
+                    <span className="inline-flex items-center gap-2 px-4 py-1.5 bg-amber-200/80 text-amber-950 font-bold text-xs rounded-full border border-amber-300">
+                      <Clock className="w-3.5 h-3.5 text-amber-800" /> En attente du traitement manager
                     </span>
                   </div>
                 </div>
@@ -246,10 +284,33 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                   <strong className="block mt-1">Progression : {Object.keys(ratings).filter(id => evaluation.competences.some(item => String(item.id) === id)).length} / {evaluation.competences.length} critères cochés.</strong>
                 </div>
 
-                {(['savoir', 'savoir_faire', 'savoir_etre'] as const).map(axis => {
-                  const axisItems = evaluation?.competences.filter(competence => competence.axe === axis) || [];
+                <section className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+                  <h3 className="font-black text-sm text-slate-900">Votre bilan professionnel</h3>
+                  {([
+                    ['balance', "1. Bilan de l'Année", "Présentez votre bilan général de l'année..."],
+                    ['achievements', '2. Réalisations Clés', 'Décrivez vos principales réalisations...'],
+                    ['difficulties', '3. Difficultés Rencontrées', 'Indiquez les difficultés rencontrées...'],
+                    ['aspirations', '4. Aspirations Professionnelles', 'Précisez vos souhaits d’évolution et aspirations...'],
+                  ] as const).map(([field, label, placeholder]) => (
+                    <div key={field}>
+                      <label className="mb-1.5 block font-bold text-slate-900">{label} *</label>
+                      <textarea
+                        rows={3}
+                        value={selfReview[field]}
+                        onChange={event => { setSelfReview(current => ({ ...current, [field]: event.target.value })); setFormError(''); }}
+                        placeholder={placeholder}
+                        className={`w-full rounded-xl border bg-white p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 ${formError && !selfReview[field].trim() ? 'border-rose-400' : 'border-slate-300'}`}
+                        required
+                        disabled={isSubmitted}
+                      />
+                    </div>
+                  ))}
+                </section>
+
+                {(['savoir', 'savoir_faire', 'savoir_etre', 'autres'] as const).map(axis => {
+                  const axisItems = evaluation?.competences.filter(competence => normalizeAxis(competence.axe) === axis) || [];
                   if (axisItems.length === 0) return null;
-                  const title = axis === 'savoir' ? 'Savoir (20 %)' : axis === 'savoir_faire' ? 'Savoir-faire (50 %)' : 'Savoir-être (30 %)';
+                  const title = axis === 'savoir' ? 'Savoir (20 %)' : axis === 'savoir_faire' ? 'Savoir-faire (50 %)' : axis === 'savoir_etre' ? 'Savoir-être (30 %)' : 'Autres critères';
                   return (
                     <section key={axis} className="space-y-2">
                       <h3 className="font-black text-sm text-slate-900 border-b border-slate-200 pb-2">{title}</h3>
@@ -283,8 +344,9 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                             rows={2}
                             value={ratingComments[String(competence.id)] || ''}
                             onChange={event => setRatingComments(current => ({ ...current, [String(competence.id)]: event.target.value }))}
-                            placeholder="Commentaire ou justification de votre niveau (facultatif)"
+                            placeholder="Commentaire ou justification obligatoire"
                             className="w-full min-w-0 p-2 rounded-lg border border-slate-300 bg-white text-[11px]"
+                            disabled={isSubmitted}
                           />
                           </div>
                         </div>
@@ -296,11 +358,11 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
             <div className="pt-2 flex justify-end">
               <button
                 type="submit"
-                disabled={isSubmitted}
+                disabled={isSubmitted || submittingAutoEval}
                 className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-400 text-white font-bold text-xs rounded-xl shadow-md flex items-center space-x-2"
               >
                 <Send className="w-4 h-4" />
-                <span>Valider et Transmettre à mon Manager</span>
+                <span>{submittingAutoEval ? 'Transmission en cours...' : 'Valider et transmettre à mon Manager'}</span>
               </button>
             </div>
           </form>
@@ -347,6 +409,40 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
             <p className="text-slate-700 italic">{evaluation.summary_comment || 'Aucun commentaire renseigné.'}</p>
           </div>
 
+          <div className="space-y-4">
+            <h3 className="font-black text-sm text-slate-900">Détail complet de l'évaluation</h3>
+            {(['savoir', 'savoir_faire', 'savoir_etre', 'autres'] as const).map(axis => {
+              const axisItems = evaluation.competences.filter(competence => normalizeAxis(competence.axe) === axis);
+              if (axisItems.length === 0) return null;
+              const title = axis === 'savoir' ? 'Savoir (20 %)' : axis === 'savoir_faire' ? 'Savoir-faire (50 %)' : axis === 'savoir_etre' ? 'Savoir-être (30 %)' : 'Autres critères';
+
+              return (
+                <section key={axis} className="rounded-2xl border border-slate-200 overflow-hidden">
+                  <div className="bg-slate-50 px-4 py-3 font-black text-xs text-slate-900 border-b border-slate-200">
+                    {title}
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {axisItems.map(competence => (
+                      <div key={competence.id} className="grid grid-cols-1 md:grid-cols-[1fr_90px] gap-3 p-4 text-xs">
+                        <div>
+                          <div className="font-bold text-slate-900">{competence.name}</div>
+                          {competence.description && <div className="mt-0.5 text-[11px] text-slate-500">{competence.description}</div>}
+                          <div className="mt-2 rounded-xl bg-slate-50 border border-slate-200 p-3 text-slate-700">
+                            {competence.comment || 'Aucun commentaire manager renseigné.'}
+                          </div>
+                        </div>
+                        <div className="md:text-right">
+                          <div className="text-[10px] uppercase font-bold text-slate-400">Note</div>
+                          <div className="text-lg font-black text-slate-900">{competence.score || 0}%</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+
           {evaluation.status === 'a_corriger' && (
             <div className="p-5 bg-amber-50 border border-amber-300 rounded-2xl space-y-3">
               <div>
@@ -366,12 +462,21 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
             </div>
           )}
 
+          {evaluation.status === 'correction_a_confirmer' && (
+            <div className="p-5 bg-emerald-50 border border-emerald-300 rounded-2xl space-y-2">
+              <div className="font-black text-sm text-emerald-950">Correction prête à signer</div>
+              <p className="text-xs text-emerald-900">
+                Votre manager a terminé les corrections demandées par la Direction Générale. Signez votre évaluation pour transmettre automatiquement le dossier à la DG.
+              </p>
+            </div>
+          )}
+
           {/* Signature / Prise de Connaissance */}
           <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
             <div>
               <div className="font-bold text-xs text-emerald-900">Signature & Prise de Connaissance</div>
               <div className="text-[11px] text-emerald-700 mt-0.5">
-                {evaluation.signed_at_user ? `Signé le ${evaluation.signed_at_user}` : 'Veuillez confirmer que vous avez pris connaissance de votre évaluation.'}
+                {evaluation.signed_at_user ? `Signé le ${evaluation.signed_at_user}` : evaluation.status === 'correction_a_confirmer' ? 'Signez la correction pour transmettre le dossier à la DG.' : 'Veuillez confirmer que vous avez pris connaissance de votre évaluation.'}
               </div>
             </div>
 
@@ -381,7 +486,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                 className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow-md flex items-center space-x-1.5"
               >
                 <Check className="w-4 h-4" />
-                <span>Signer l'Évaluation</span>
+                <span>{evaluation.status === 'correction_a_confirmer' ? 'Signer et envoyer à la DG' : "Signer l'Évaluation"}</span>
               </button>
             ) : (
               <span className="px-3 py-1 bg-emerald-200 text-emerald-900 font-extrabold text-xs rounded-full flex items-center space-x-1">
@@ -453,3 +558,4 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
     </div>
   );
 };
+

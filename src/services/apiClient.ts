@@ -58,14 +58,14 @@ export const apiClient = {
     return fetchApi(`/api/users${query ? `?${query}` : ''}`);
   },
 
-  createUser: async (data: Partial<User> & { password: string }): Promise<User> => {
+  createUser: async (data: Partial<User>): Promise<{ message: string; email_sent: boolean; user: User }> => {
     return fetchApi('/api/users', {
       method: 'POST',
       body: JSON.stringify(data)
     });
   },
 
-  changePassword: async (currentPassword: string, newPassword: string): Promise<{ message: string }> => {
+  changePassword: async (currentPassword: string, newPassword: string): Promise<{ message: string; user?: User }> => {
     return fetchApi('/api/auth/profile/password', {
       method: 'PUT',
       body: JSON.stringify({ currentPassword, newPassword })
@@ -83,6 +83,10 @@ export const apiClient = {
     return fetchApi(`/api/users/${id}`, { method: 'DELETE' });
   },
 
+  resendUserInvitation: async (id: number): Promise<{ message: string }> => {
+    return fetchApi(`/api/users/${id}/resend-invitation`, { method: 'POST' });
+  },
+
   getDirections: async () => {
     return fetchApi('/api/directions');
   },
@@ -96,6 +100,10 @@ export const apiClient = {
 
   getFiliales: async () => {
     return fetchApi('/api/filiales');
+  },
+
+  getPostes: async () => {
+    return fetchApi('/api/postes');
   },
 
   createFiliale: async (data: { name?: string; city: string }) => {
@@ -127,6 +135,10 @@ export const apiClient = {
       method: 'PUT',
       body: JSON.stringify(data)
     });
+  },
+
+  deleteCampaign: async (id: number): Promise<{ message: string }> => {
+    return fetchApi(`/api/campaigns/${id}`, { method: 'DELETE' });
   },
 
   launchCampaign: async (id: number): Promise<{ message: string; campagne: Campagne }> => {
@@ -219,6 +231,17 @@ export const apiClient = {
     });
   },
 
+  addImprovementAxis: async (evaluationId: number, data: { domain: string; objective: string; comment?: string }) => {
+    return fetchApi(`/api/evaluations/${evaluationId}/improvements`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
+
+  deleteImprovementAxis: async (evaluationId: number, axisId: number) => {
+    return fetchApi(`/api/evaluations/${evaluationId}/improvements/${axisId}`, { method: 'DELETE' });
+  },
+
   submitEvaluationToDG: async (id: number) => {
     return fetchApi(`/api/evaluations/${id}/submit`, { method: 'POST' });
   },
@@ -291,6 +314,13 @@ export const apiClient = {
 
   getJobTemplates: async () => {
     return fetchApi('/api/job-templates');
+  },
+
+  importJobTemplates: async (models: Array<{ poste_name: string; criteria: Array<{ axe: string; name: string; description: string; coefficient: number }> }>) => {
+    return fetchApi('/api/job-templates/import', {
+      method: 'POST',
+      body: JSON.stringify({ models })
+    });
   },
 
   updateJobFiche: async (id: number, data: { name?: string; description?: string }) => {

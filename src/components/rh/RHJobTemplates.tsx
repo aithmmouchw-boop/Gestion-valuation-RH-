@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { FicheEvaluation, CompetenceTemplate, AxeType } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
 import { FileText, Download, FileSpreadsheet, Plus, Edit2, Upload, Trash2, X } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 export const RHJobTemplates: React.FC = () => {
   const [fiches, setFiches] = useState<FicheEvaluation[]>([]);
   const [templates, setTemplates] = useState<CompetenceTemplate[]>([]);
   const [selectedFicheId, setSelectedFicheId] = useState<number>(1);
+  const [modelSearchTerm, setModelSearchTerm] = useState('');
 
   // Edit Modals
   const [showEditFicheModal, setShowEditFicheModal] = useState(false);
@@ -18,6 +20,8 @@ export const RHJobTemplates: React.FC = () => {
   const [critereForm, setCritereForm] = useState({ name: '', description: '', coefficient: 1 });
 
   const [editingCritere, setEditingCritere] = useState<CompetenceTemplate | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const loadData = () => {
@@ -31,73 +35,39 @@ export const RHJobTemplates: React.FC = () => {
     loadData();
   }, []);
 
-  const currentFiche = fiches.find(f => f.id === selectedFicheId) || fiches[0];
+  const filteredFiches = fiches.filter(fiche => {
+    const query = modelSearchTerm.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      fiche.name.toLowerCase().includes(query) ||
+      fiche.poste_name.toLowerCase().includes(query) ||
+      (fiche.description || '').toLowerCase().includes(query)
+    );
+  });
+  const selectedFiche = fiches.find(f => f.id === selectedFicheId);
+  const currentFiche = selectedFiche && filteredFiches.some(f => f.id === selectedFiche.id) ? selectedFiche : filteredFiches[0] || fiches[0];
   const currentCompetencies = templates.filter(t => t.fiche_id === (currentFiche ? currentFiche.id : selectedFicheId));
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !currentFiche) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const content = event.target?.result as string;
-      if (!content) return;
-
-      let importedCount = 0;
-
-      try {
-        // Try parsing JSON first
-        if (file.name.endsWith('.json') || content.trim().startsWith('{') || content.trim().startsWith('[')) {
-          const parsed = JSON.parse(content);
-          const itemsToImport = Array.isArray(parsed) ? parsed : (parsed.competences || parsed.criteres || []);
-
-          for (const item of itemsToImport) {
-            await apiClient.addJobCompetence({
-              fiche_id: currentFiche.id,
-              axe: item.axe || 'savoir_faire',
-              name: item.name || item.nom || item.title || 'Critère Importé',
-              description: item.description || '',
-              coefficient: Number(item.coefficient || item.coeff || 1)
-            });
-            importedCount++;
-          }
-        } else {
-          // Parse CSV or TXT line by line: axe;nom;description;coefficient
-          const lines = content.split('\n');
-          for (const line of lines) {
-            const cleanLine = line.trim();
-            if (!cleanLine || cleanLine.startsWith('#') || cleanLine.toLowerCase().startsWith('axe')) continue;
-
-            const parts = cleanLine.includes(';') ? cleanLine.split(';') : cleanLine.split(',');
-            if (parts.length >= 2) {
-              const rawAxe = parts[0].trim().toLowerCase();
-              const axe: AxeType = rawAxe.includes('etre') || rawAxe.includes('être') ? 'savoir_etre' : 
-                                   rawAxe.includes('faire') ? 'savoir_faire' : 'savoir';
-              const name = parts[1].trim();
-              const description = parts[2] ? parts[2].trim() : 'Critère importé depuis fichier';
-              const coefficient = parts[3] ? parseFloat(parts[3].trim()) || 1 : 1;
-
-              await apiClient.addJobCompetence({
-                fiche_id: currentFiche.id,
-                axe,
-                name,
-                description,
-                coefficient
-              });
-              importedCount++;
-            }
-          }
-        }
-
-        alert(`Importation réussie ! ${importedCount} critère(s) de compétence ont été ajoutés au modèle "${currentFiche.poste_name}".`);
-        loadData();
-      } catch (err: any) {
-        alert("Erreur lors de la lecture du fichier : Veuillez vérifier le format (JSON ou CSV formaté 'axe;nom;description;coefficient').");
-      }
-    };
-
-    reader.readAsText(file);
-    if (e.target) e.target.value = '';
+    if (!file) return;
+    setIsImporting(true);setImportMessage('');
+    try {
+      const workbook=XLSX.read(await file.arrayBuffer(),{type:'array',cellFormula:false,cellHTML:false});
+      const normalize=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+      const excluded=new Set(['referentiel de poste','liste des fonctions']);
+      const models=workbook.SheetNames.filter(name=>!excluded.has(normalize(name))).map(posteName=>{
+        const rows=XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[posteName],{header:1,defval:'',raw:false});
+        let axis:AxeType|null=null;const criteria:Array<{axe:AxeType;name:string;description:string;coefficient:number}>=[];
+        for(const row of rows){const first=String(row[0]||'').trim();const label=normalize(first).replace(/ /g,'');if(label==='savoir'||label==='savoirfaire'||label==='savoiretre'){axis=label==='savoir'?'savoir':label==='savoirfaire'?'savoir_faire':'savoir_etre';continue;}if(!axis||!first||String(row[9]||'').trim()!=='-')continue;criteria.push({axe:axis,name:first,description:axis==='savoir'?'Connaissance ou qualification nécessaire à la tenue du poste.':axis==='savoir_faire'?'Responsabilité ou activité opérationnelle du poste.':'Comportement professionnel attendu dans la fonction.',coefficient:axis==='savoir'?0.2:axis==='savoir_faire'?0.5:0.3});}
+        return {poste_name:posteName,criteria};
+      }).filter(model=>model.criteria.length>0);
+      if(models.length===0)throw new Error('Aucune fiche exploitable trouvée dans ce fichier Excel.');
+      const response=await apiClient.importJobTemplates(models);const result=response.result;
+      setImportMessage(`${result.fiches} fiche(s) et ${result.criteres} compétence(s) importées. ${result.postes_crees} nouveau(x) poste(s) créé(s).`);
+      await loadData();
+    }catch(error:any){setImportMessage(error.message||"L'import du fichier Excel a échoué.");}
+    finally{setIsImporting(false);e.target.value='';}
   };
 
   const handleOpenEditFiche = () => {
@@ -183,7 +153,7 @@ export const RHJobTemplates: React.FC = () => {
             type="file"
             ref={fileInputRef}
             onChange={handleFileUpload}
-            accept=".json,.csv,.txt"
+            accept=".xlsx,.xls"
             className="hidden"
           />
           <button onClick={handleExportPDF} className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center space-x-1.5 border border-slate-200">
@@ -196,12 +166,18 @@ export const RHJobTemplates: React.FC = () => {
           </button>
           <button 
             onClick={() => fileInputRef.current?.click()} 
-            className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-lg flex items-center space-x-1.5 shadow-sm transition-colors"
+            disabled={isImporting}
+            className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:bg-slate-400 text-white font-bold text-xs rounded-lg flex items-center space-x-1.5 shadow-sm transition-colors"
           >
             <Upload className="w-4 h-4" />
-            <span>Importer Fichier Modèle</span>
+            <span>{isImporting ? 'Analyse du fichier...' : 'Importer le fichier Excel global'}</span>
           </button>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-950">
+        <strong>Configuration globale des fiches :</strong> importez un seul classeur Excel contenant une feuille par poste. L'application détecte automatiquement les rubriques Savoir, Savoir-faire et Savoir-être, crée les postes manquants et remplace les compétences de chaque modèle. Après l'import, le DRH peut continuer à modifier les modèles directement ici sans réimporter le fichier.
+        {importMessage && <div className="mt-2 font-bold text-blue-900">{importMessage}</div>}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -210,8 +186,21 @@ export const RHJobTemplates: React.FC = () => {
           <div className="font-bold text-xs text-slate-400 uppercase tracking-wider px-2 mb-2">
             Modèles de Fiches ({fiches.length})
           </div>
+          <input
+            type="text"
+            value={modelSearchTerm}
+            onChange={event => setModelSearchTerm(event.target.value)}
+            placeholder="Rechercher un modèle par poste..."
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-emerald-600 focus:bg-white"
+          />
 
-          {fiches.map(f => (
+          {filteredFiches.length === 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+              Aucun modèle trouvé.
+            </div>
+          )}
+
+          {filteredFiches.map(f => (
             <button
               key={f.id}
               onClick={() => setSelectedFicheId(f.id)}
@@ -499,3 +488,4 @@ export const RHJobTemplates: React.FC = () => {
     </div>
   );
 };
+

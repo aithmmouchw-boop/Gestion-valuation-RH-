@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { NotificationConfig } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { CheckCircle2, Save, BellRing } from 'lucide-react';
@@ -94,3 +94,4 @@ export const RHNotificationsConfig: React.FC = () => {
     </div>
   );
 };
+

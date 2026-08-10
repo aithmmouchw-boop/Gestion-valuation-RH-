@@ -1,47 +1,25 @@
-import React, { useState } from 'react';
-import { ArrowRight, BriefcaseBusiness, Building2, Eye, EyeOff, LockKeyhole, ShieldCheck, UserRound, UsersRound } from 'lucide-react';
-import { User, UserRole } from '../types';
+﻿import React, { useState } from 'react';
+import { ArrowRight, Building2, Eye, EyeOff, LockKeyhole } from 'lucide-react';
+import { User } from '../types';
 import { apiClient } from '../services/apiClient';
 
 interface LoginPageProps {
   onLogin: (user: User) => void;
 }
 
-const demoProfiles: Array<{
-  role: UserRole;
-  label: string;
-  name: string;
-  email: string;
-  color: string;
-  icon: React.ComponentType<{ className?: string }>;
-}> = [
-  { role: 'rh', label: 'Direction RH', name: 'Meriem Benjelloun', email: 'rh@groupepremium.ma', color: 'emerald', icon: BriefcaseBusiness },
-  { role: 'manager', label: 'Manager', name: 'Nabil Idrissi', email: 'nabil.idrissi@groupepremium.ma', color: 'amber', icon: UsersRound },
-  { role: 'collaborateur', label: 'Collaborateur', name: 'Amine Tazi', email: 'amine.tazi@groupepremium.ma', color: 'blue', icon: UserRound },
-  { role: 'dg', label: 'Direction Générale', name: 'Hassan El Fassi', email: 'dg@groupepremium.ma', color: 'violet', icon: ShieldCheck },
-];
-
 export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<UserRole | ''>('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const selectProfile = (profile: typeof demoProfiles[number]) => {
-    setSelectedRole(profile.role);
-    setEmail(profile.email);
-    setPassword('demo1234');
-    setError('');
-  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
     setError('');
     try {
-      const result = await apiClient.login(email.trim(), selectedRole || undefined, password);
+      const result = await apiClient.login(email.trim(), undefined, password);
       onLogin(result.user);
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : 'Connexion impossible.');
@@ -96,36 +74,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           <div className="mb-7">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Bienvenue</p>
             <h2 className="mt-2 text-3xl font-black text-slate-950">Connectez-vous à votre espace</h2>
-            <p className="mt-2 text-sm text-slate-500">Choisissez votre espace ou saisissez directement vos identifiants professionnels.</p>
-          </div>
-
-          <div className="mb-6 grid grid-cols-2 gap-3">
-            {demoProfiles.map(profile => {
-              const Icon = profile.icon;
-              const isSelected = selectedRole === profile.role;
-              return (
-                <button
-                  key={profile.role}
-                  type="button"
-                  onClick={() => selectProfile(profile)}
-                  className={`rounded-2xl border p-3 text-left transition-all ${
-                    isSelected
-                      ? 'border-emerald-600 bg-emerald-50 ring-2 ring-emerald-600/10'
-                      : 'border-slate-200 bg-white hover:border-emerald-300 hover:shadow-sm'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isSelected ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-slate-900">{profile.label}</div>
-                      <div className="truncate text-[10px] text-slate-500">{profile.name}</div>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+            <p className="mt-2 text-sm text-slate-500">Saisissez vos identifiants professionnels pour accéder à la plateforme.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50">
@@ -184,7 +133,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
             </button>
 
             <p className="text-center text-[10px] text-slate-400">
-              Pour les profils de démonstration, le mot de passe est <strong className="text-slate-600">demo1234</strong>.
+              Accès réservé aux utilisateurs autorisés.
             </p>
           </form>
         </div>
@@ -192,3 +141,4 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     </div>
   );
 };
+

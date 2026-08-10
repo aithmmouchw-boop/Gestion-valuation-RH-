@@ -5,6 +5,7 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { LoginPage } from './components/LoginPage';
 import { MyProfile } from './components/MyProfile';
+import { FirstLoginPassword } from './components/FirstLoginPassword';
 
 // RH Views
 import { RHDashboard } from './components/rh/RHDashboard';
@@ -25,6 +26,7 @@ import { DGView } from './components/dg/DGView';
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
@@ -69,6 +71,10 @@ export default function App() {
 
   if (!currentUser) return <LoginPage onLogin={handleLogin} />;
 
+  if (currentUser.must_change_password) {
+    return <FirstLoginPassword user={currentUser} onComplete={user => { setCurrentUser(user); setDefaultTab(user.role); }} onLogout={handleLogout} />;
+  }
+
   const renderView = () => {
     if (activeTab === 'my_profile') {
       return <MyProfile currentUser={currentUser} />;
@@ -106,19 +112,19 @@ export default function App() {
       case 'team_list':
       case 'manager_team':
       case 'past_campaigns':
-        return <ManagerView currentUser={currentUser} initialTab={activeTab} />;
+        return <ManagerView currentUser={currentUser} initialTab={activeTab} onNavigateTab={setActiveTab} />;
 
       // Collaborator Views
       case 'my_eval':
       case 'collab_eval':
       case 'my_history':
-        return <CollaborateurView currentUser={currentUser} initialTab={activeTab} />;
+        return <CollaborateurView currentUser={currentUser} initialTab={activeTab} onNavigateTab={setActiveTab} />;
 
       // DG Views
       case 'dg_queue':
       case 'dg_archive':
       case 'dg_validation':
-        return <DGView currentUser={currentUser} initialTab={activeTab} />;
+        return <DGView currentUser={currentUser} initialTab={activeTab} onNavigateTab={setActiveTab} />;
 
       default:
         return <RHDashboard />;
@@ -133,13 +139,24 @@ export default function App() {
       />
 
       <div className="flex-1 flex overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(value => !value)}
+          className="fixed left-3 top-3 z-50 h-9 w-9 rounded-lg bg-slate-900 text-white shadow-md hover:bg-slate-800 transition-colors"
+          title={sidebarOpen ? 'Masquer le menu' : 'Afficher le menu'}
+          aria-label={sidebarOpen ? 'Masquer le menu' : 'Afficher le menu'}
+        >
+          ☰
+        </button>
+
         <Sidebar 
           role={currentUser.role} 
           activeTab={activeTab} 
-          onSelectTab={setActiveTab} 
+          onSelectTab={setActiveTab}
+          isOpen={sidebarOpen}
         />
 
-        <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
+        <main className="flex-1 p-6 lg:p-8 overflow-y-auto transition-all duration-300">
           {renderView()}
         </main>
       </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Direction, Filiale } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { Building2, Plus, MapPin, Layers, X, Download, FileSpreadsheet, Search } from 'lucide-react';
@@ -346,3 +346,4 @@ export const RHDepartmentManagement: React.FC = () => {
     </div>
   );
 };
+

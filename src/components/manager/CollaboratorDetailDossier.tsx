@@ -1,16 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Evaluation, EvaluationCompetence, Objectif } from '../../types';
+﻿import React, { useState, useEffect } from 'react';
+import { BesoinFormation, Evaluation, EvaluationCompetence, Objectif } from '../../types';
 import { apiClient } from '../../services/apiClient';
-import { UserInitials } from '../UserInitials';
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
-import { 
-  ArrowLeft, Plus, Trash2, Save, Send, AlertCircle, CheckCircle2, X, Download, FileSpreadsheet 
-} from 'lucide-react';
+import { AlertCircle, Plus, Trash2, X } from 'lucide-react';
 
 interface CollaboratorDetailDossierProps {
   evaluationId: number;
   onBack: () => void;
   readOnly?: boolean;
+  readOnlyContext?: 'dg' | 'rh';
   showGuidelines?: boolean;
 }
 
@@ -22,16 +20,17 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   evaluationId,
   onBack,
   readOnly = false,
+  readOnlyContext = 'dg',
   showGuidelines = true,
 }) => {
   const defaultObjectiveDate = `${new Date().getFullYear()}-12-31`;
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
-  const [activeTab, setActiveTab] = useState<'resume' | 'auto_eval' | 'savoir' | 'savoir_faire' | 'savoir_etre' | 'besoins' | 'objectifs' | 'historique'>('resume');
+  const [activeTab, setActiveTab] = useState<'resume' | 'auto_eval' | 'savoir' | 'savoir_faire' | 'savoir_etre' | 'besoins' | 'objectifs' | 'ameliorations' | 'historique'>('resume');
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [interviewDate, setInterviewDate] = useState('');
-  const [interviewMessage, setInterviewMessage] = useState('Réunion pour discuter ensemble de votre auto-évaluation annuelle.');
+  const [interviewMessage, setInterviewMessage] = useState('Reunion pour discuter ensemble de votre auto-evaluation annuelle.');
 
   // Modals for adding
   const [showAddSkillModal, setShowAddSkillModal] = useState(false);
@@ -42,6 +41,8 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   const [newTrainingForm, setNewTrainingForm] = useState({ title: '', description: '', priority: 'Haute' as 'Haute' | 'Moyenne' | 'Basse', comment: '' });
 
   const [showAddObjectiveModal, setShowAddObjectiveModal] = useState(false);
+  const [showAddImprovementModal, setShowAddImprovementModal] = useState(false);
+  const [newImprovementForm, setNewImprovementForm] = useState({ domain: '', objective: '', comment: '' });
   const [newObjectiveForm, setNewObjectiveForm] = useState<{ title: string; description: string; target_date: string; progress: number; status: Objectif['status'] }>({ title: '', description: '', target_date: defaultObjectiveDate, progress: 0, status: 'Non débuté' });
 
   const loadEvaluation = () => {
@@ -79,6 +80,15 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   const scoreSavoirFaire = calcAvg(savoirFaires);
   const scoreSavoirEtre = calcAvg(savoirEtres);
   const scoreGlobal = Math.round((scoreSavoir * 0.20 + scoreSavoirFaire * 0.50 + scoreSavoirEtre * 0.30) * 10) / 10;
+  const hasInterview = Boolean(evaluation.interview_date);
+  const canSubmitToDG = !isSaving && hasInterview;
+  const evaluationWithScores = (): Evaluation => ({
+    ...evaluation,
+    score_savoir: scoreSavoir,
+    score_savoir_faire: scoreSavoirFaire,
+    score_savoir_etre: scoreSavoirEtre,
+    score_global: scoreGlobal,
+  });
 
   const handleScoreChange = (compId: number, newScore: number) => {
     const updatedCompetences = evaluation.competences.map(c => c.id === compId ? { ...c, score: newScore } : c);
@@ -107,10 +117,25 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
 
   const handleAddTrainingSubmit = async () => {
     if (!newTrainingForm.title) return;
-    const res = await apiClient.addTrainingNeed(evaluation.id, newTrainingForm);
-    setEvaluation(res.evaluation);
+    const previousEvaluation = evaluation;
+    const temporaryTraining: BesoinFormation = {
+      id: -Date.now(),
+      evaluation_id: evaluation.id,
+      ...newTrainingForm,
+    };
+    setEvaluation({
+      ...evaluation,
+      besoins_formation: [...evaluation.besoins_formation, temporaryTraining],
+    });
     setShowAddTrainingModal(false);
     setNewTrainingForm({ title: '', description: '', priority: 'Haute', comment: '' });
+    try {
+      const res = await apiClient.addTrainingNeed(evaluation.id, newTrainingForm);
+      setEvaluation(res.evaluation || res);
+    } catch (error: any) {
+      setEvaluation(previousEvaluation);
+      setSuccessMessage(error.message || 'Impossible d’ajouter la formation.');
+    }
   };
 
   const handleDeleteTraining = async (trainingId: number) => {
@@ -122,9 +147,25 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
 
   const handleAddObjectiveSubmit = async () => {
     if (!newObjectiveForm.title) return;
-    const res = await apiClient.addObjective(evaluation.id, newObjectiveForm);
-    setEvaluation(res.evaluation);
+    const previousEvaluation = evaluation;
+    const temporaryObjective: Objectif = {
+      id: -Date.now(),
+      evaluation_id: evaluation.id,
+      is_next_year: true,
+      ...newObjectiveForm,
+    };
+    setEvaluation({
+      ...evaluation,
+      objectifs: [...evaluation.objectifs, temporaryObjective],
+    });
     setShowAddObjectiveModal(false);
+    try {
+      const res = await apiClient.addObjective(evaluation.id, newObjectiveForm);
+      setEvaluation(res.evaluation || res);
+    } catch (error: any) {
+      setEvaluation(previousEvaluation);
+      setSuccessMessage(error.message || 'Impossible d’ajouter l’objectif.');
+    }
     setNewObjectiveForm({ title: '', description: '', target_date: defaultObjectiveDate, progress: 0, status: 'Non débuté' });
   };
 
@@ -135,12 +176,32 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
     }
   };
 
+  const handleAddImprovement = async () => {
+    if (!newImprovementForm.domain || !newImprovementForm.objective) return;
+    const res = await apiClient.addImprovementAxis(evaluation.id, newImprovementForm);
+    setEvaluation(res.evaluation || res);
+    setShowAddImprovementModal(false);
+    setNewImprovementForm({ domain: '', objective: '', comment: '' });
+  };
+
+  const handleDeleteImprovement = async (axisId: number) => {
+    if (!confirm("Supprimer cet axe d'amélioration ?")) return;
+    const res = await apiClient.deleteImprovementAxis(evaluation.id, axisId);
+    setEvaluation(res.evaluation || res);
+  };
+
   const handleSaveDraft = async () => {
     setIsSaving(true);
-    await apiClient.updateEvaluation(evaluation.id, evaluation);
-    setIsSaving(false);
-    setSuccessMessage('Brouillon enregistré avec succès');
-    setTimeout(() => setSuccessMessage(''), 3000);
+    try {
+      const saved = await apiClient.updateEvaluation(evaluation.id, evaluationWithScores());
+      setEvaluation(saved);
+      setSuccessMessage('Brouillon enregistre avec succes');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (error: any) {
+      setSuccessMessage(error.message || 'Impossible d’enregistrer le brouillon.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleScheduleInterview = async () => {
@@ -157,19 +218,30 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   };
 
   const handleSubmitToDG = async () => {
+    if (!hasInterview) {
+      setSuccessMessage('Planifiez d’abord l’entretien avec le collaborateur avant de soumettre à la DG.');
+      return;
+    }
     const firstIncomplete = evaluation.competences.find(competence => Number(competence.score) <= 0);
     if (firstIncomplete) {
       setActiveTab(firstIncomplete.axe);
       setSuccessMessage(`Complétez d’abord toutes les notes de l’axe ${firstIncomplete.axe.replace('_', '-')}.`);
       return;
     }
+    const firstMissingComment = evaluation.competences.find(competence => !competence.comment?.trim());
+    if (firstMissingComment) {
+      setActiveTab(firstMissingComment.axe);
+      setSuccessMessage('Ajoutez un commentaire manager pour chaque competence avant de soumettre a la DG.');
+      return;
+    }
     if (!confirm('Soumettre cette évaluation à la Direction Générale ?')) return;
     setIsSaving(true);
     try {
-      const saved = await apiClient.updateEvaluation(evaluation.id, evaluation);
+      const saved = await apiClient.updateEvaluation(evaluation.id, evaluationWithScores());
       setEvaluation(saved);
       const result = await apiClient.submitEvaluationToDG(evaluation.id);
       setEvaluation(result.evaluation);
+      setActiveTab('resume');
       setSuccessMessage('Évaluation transmise à la DG. Vous restez dans le dossier pour consultation.');
     } catch (error: any) {
       setSuccessMessage(error.message || 'La soumission a échoué.');
@@ -185,12 +257,19 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
       setSuccessMessage('Toutes les notes doivent être complétées avant la confirmation du collaborateur.');
       return;
     }
+    const firstMissingComment = evaluation.competences.find(competence => !competence.comment?.trim());
+    if (firstMissingComment) {
+      setActiveTab(firstMissingComment.axe);
+      setSuccessMessage('Ajoutez un commentaire manager pour chaque competence avant de terminer la correction.');
+      return;
+    }
     setIsSaving(true);
     try {
-      const saved = await apiClient.updateEvaluation(evaluation.id, evaluation);
+      const saved = await apiClient.updateEvaluation(evaluation.id, evaluationWithScores());
       setEvaluation(saved);
       const result = await apiClient.submitCorrectionToCollaborator(evaluation.id);
       setEvaluation(result.evaluation);
+      setActiveTab('resume');
       setSuccessMessage(result.message);
     } catch (error: any) {
       setSuccessMessage(error.message || 'Impossible de terminer la correction.');
@@ -227,21 +306,14 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
-          className="flex items-center space-x-2 text-xs font-bold text-slate-600 hover:text-emerald-800 bg-white px-3.5 py-2 rounded-xl border border-slate-200/80 shadow-sm transition-colors"
+          className="text-xs font-bold text-slate-600 hover:text-emerald-800 bg-white px-3.5 py-2 rounded-xl border border-slate-200/80 shadow-sm transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Retour à la liste des collaborateurs</span>
+          Retour a la liste des collaborateurs
         </button>
 
         <div className="flex items-center space-x-2">
-          <button onClick={handleExportPDF} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-1">
-            <Download className="w-3.5 h-3.5 text-emerald-700" />
-            <span>PDF</span>
-          </button>
-          <button onClick={handleExportExcel} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-1">
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-            <span>Excel</span>
-          </button>
+          <button onClick={handleExportPDF} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg">PDF</button>
+          <button onClick={handleExportExcel} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg">Excel</button>
         </div>
       </div>
 
@@ -250,20 +322,18 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
         {/* Left 3 Columns: Main dossier info & Tabs */}
         <div className="lg:col-span-3 space-y-6">
           {/* Header Card */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-5">
-            <UserInitials name={evaluation.user_name} className="w-20 h-20 border-2 border-emerald-600 text-xl shadow-md" />
-
-            <div className="text-center sm:text-left flex-1">
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+            <div className="flex-1">
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
                 <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-900 font-extrabold text-[10px] rounded-full">
                   {evaluation.user_category}
                 </span>
-                <span className="text-xs text-slate-400">•</span>
+                <span className="text-xs text-slate-400">-</span>
                 <span className="text-xs text-slate-600 font-semibold">{evaluation.filiale_name}</span>
               </div>
 
               <h1 className="text-2xl font-black text-slate-900 mt-1">{evaluation.user_name}</h1>
-              <p className="text-xs font-semibold text-slate-600">{evaluation.poste_name} — {evaluation.direction_name}</p>
+              <p className="text-xs font-semibold text-slate-600">{evaluation.poste_name} - {evaluation.direction_name}</p>
 
               <div className="mt-2 text-[11px] text-slate-500 flex flex-wrap gap-4">
                 <span>Manager: <strong>{evaluation.manager_name}</strong></span>
@@ -278,10 +348,10 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
           <div className="p-4 bg-amber-50/80 border border-amber-200/80 rounded-2xl flex items-start space-x-3 text-xs text-amber-950 shadow-sm">
             <AlertCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
             <div>
-              <div className="font-bold text-amber-900 text-sm">Règles & Consignes d'Évaluation DRH ({evaluation.campagne_name})</div>
+              <div className="font-bold text-amber-900 text-sm">Regles et consignes d'evaluation DRH ({evaluation.campagne_name})</div>
               <p className="mt-1 font-medium text-slate-800 leading-relaxed">
-                1. Évaluation factuelle basée sur les réalisations réelles et preuves de travail.<br/>
-                2. Respect strict des pondérations officielles : Savoir (20%), Savoir-faire (50%), Savoir-être (30%).<br/>
+                1. Evaluation factuelle basee sur les realisations reelles et preuves de travail.<br/>
+                2. Respect strict des ponderations officielles : Savoir (20%), Savoir-faire (50%), Savoir-etre (30%).<br/>
                 3. Entretien individuel obligatoire d'au moins 45 minutes avec le collaborateur.<br/>
                 4. Formalisation systématique d'au moins un besoin de formation.
               </p>
@@ -291,7 +361,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
 
           {readOnly && (
             <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-900">
-              Consultation DG en lecture seule — aucune modification n’est autorisée.
+              Consultation {readOnlyContext === 'rh' ? 'historique DRH' : 'DG'} en lecture seule — aucune modification n’est autorisée.
             </div>
           )}
 
@@ -301,7 +371,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                 <h3 className="font-bold text-sm text-indigo-950">Entretien individuel avec {evaluation.user_name}</h3>
                 <p className="text-[11px] text-indigo-800 mt-0.5">
                   {evaluation.interview_date
-                    ? `Entretien planifié le ${new Date(evaluation.interview_date).toLocaleString('fr-FR')}. Les notes manager sont déverrouillées.`
+                    ? `Entretien planifie le ${new Date(evaluation.interview_date).toLocaleString('fr-FR')}. Les notes manager sont deverrouillees.`
                     : 'Planifiez l’entretien pour notifier le collaborateur et déverrouiller la notation manager.'}
                 </p>
               </div>
@@ -360,6 +430,12 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
               Objectifs
             </button>
             <button
+              onClick={() => setActiveTab('ameliorations')}
+              className={`px-3 py-2 rounded-xl transition-all ${activeTab === 'ameliorations' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
+            >
+              Axes d'amélioration
+            </button>
+            <button
               onClick={() => setActiveTab('historique')}
               className={`px-3 py-2 rounded-xl transition-all ${activeTab === 'historique' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
             >
@@ -372,7 +448,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
           {/* 1. Résumé */}
           {activeTab === 'resume' && (
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
-              <h3 className="font-bold text-sm text-slate-900">Résumé Général & Synthèse Manager</h3>
+              <h3 className="font-bold text-sm text-slate-900">Résumé général et synthèse manager</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
                 {evaluation.summary_comment || 'Aucune appréciation globale renseignée pour le moment.'}
               </p>
@@ -396,7 +472,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
           {activeTab === 'auto_eval' && (
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-5">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h3 className="font-bold text-sm text-slate-900">Auto-évaluation Renseignée par le Collaborateur</h3>
+                <h3 className="font-bold text-sm text-slate-900">Auto-évaluation renseignée par le collaborateur</h3>
                 <span className="px-2.5 py-0.5 bg-blue-50 text-blue-800 font-bold text-[10px] rounded-full">
                   Consultation seule
                 </span>
@@ -452,20 +528,10 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                     Grille Évaluation: {activeTab === 'savoir' ? 'Savoir (20%)' : activeTab === 'savoir_faire' ? 'Savoir-faire (50%)' : 'Savoir-être (30%)'}
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    {readOnly ? 'Notes et commentaires renseignés par le manager.' : 'Attribuez une note sur 100 et modifiez ou ajoutez dynamiquement des compétences.'}
+                    {readOnly ? 'Notes et commentaires renseignés par le manager.' : 'Attribuez une note sur 100 et ajoutez un commentaire. La structure des compétences est gérée uniquement par le DRH.'}
                   </p>
                 </div>
 
-                {!readOnly && <button
-                  onClick={() => {
-                    setAddSkillAxe(activeTab);
-                    setShowAddSkillModal(true);
-                  }}
-                  className="px-3 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow-sm flex items-center space-x-1.5"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Ajouter une compétence</span>
-                </button>}
               </div>
 
               {/* Cards for each skill */}
@@ -477,13 +543,6 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                         <h4 className="font-bold text-sm text-slate-900">{c.name}</h4>
                         <p className="text-xs text-slate-500 mt-0.5">{c.description}</p>
                       </div>
-                      {!readOnly && <button
-                        onClick={() => handleDeleteCompetence(c.id)}
-                        className="p-1 text-slate-400 hover:text-rose-600 rounded"
-                        title="Supprimer cette compétence"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>}
                     </div>
 
                     {/* Niveaux officiels issus du fichier d'évaluation */}
@@ -499,7 +558,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                           <button
                             key={score}
                             type="button"
-                            disabled={readOnly || !evaluation.interview_date}
+                            disabled={readOnly || !hasInterview}
                             onClick={() => handleScoreChange(c.id, Number(score))}
                             className={`px-2.5 py-1.5 rounded-lg border text-xs font-black ${c.score === score ? 'bg-emerald-900 text-white border-emerald-900' : 'bg-white text-slate-700 border-slate-300'} disabled:opacity-50 disabled:cursor-not-allowed`}
                           >
@@ -508,10 +567,10 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                         ))}
                       </div>
                     </div>
-                    {!readOnly && !evaluation.interview_date && <p className="text-[11px] font-bold text-amber-700">Notation verrouillée jusqu’à la planification de l’entretien.</p>}
+                    {!readOnly && !hasInterview && <p className="text-[11px] font-bold text-amber-700">Notation verrouillée jusqu’à la planification de l’entretien.</p>}
 
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Commentaire (Facultatif)</label>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Commentaire manager obligatoire</label>
                       {readOnly ? (
                         <p className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
                           {c.comment || 'Aucun commentaire.'}
@@ -520,7 +579,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                         type="text"
                         value={c.comment || ''}
                         onChange={(e) => handleCommentChange(c.id, e.target.value)}
-                        placeholder="Observation sur cette compétence..."
+                        placeholder="Observation obligatoire sur cette competence..."
                         className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                       />}
                     </div>
@@ -540,7 +599,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                   className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-xl shadow flex items-center space-x-1.5 transition-all"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Ajouter Formation</span>
+                  <span>Ajouter une formation</span>
                 </button>}
               </div>
 
@@ -584,7 +643,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                   className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-xl shadow flex items-center space-x-1.5 transition-all"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Ajouter Objectif</span>
+                  <span>Ajouter un objectif</span>
                 </button>}
               </div>
 
@@ -618,6 +677,23 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
             </div>
           )}
 
+          {activeTab === 'ameliorations' && (
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div><h3 className="font-bold text-sm text-slate-900">Axes d'amélioration</h3><p className="text-[11px] text-slate-500">Actions de progrès définies par le manager.</p></div>
+                {!readOnly && <button onClick={() => setShowAddImprovementModal(true)} className="px-3.5 py-2 bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"><Plus className="w-4 h-4" />Ajouter un axe</button>}
+              </div>
+              <div className="space-y-3">
+                {(evaluation.axes_developpement || []).length === 0 ? <p className="text-xs text-slate-400 italic">Aucun axe d'amélioration défini.</p> : (evaluation.axes_developpement || []).map(axis => (
+                  <div key={axis.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex justify-between gap-4 text-xs">
+                    <div><div className="font-bold text-sm text-slate-900">{axis.domain}</div><div className="mt-1 text-slate-700">{axis.objective}</div>{axis.comment && <div className="mt-1 text-slate-500 italic">{axis.comment}</div>}</div>
+                    {!readOnly && <button onClick={() => handleDeleteImprovement(axis.id)} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 className="w-4 h-4" /></button>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 8. Historique */}
           {activeTab === 'historique' && (
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-3">
@@ -629,10 +705,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
           {/* Bottom Action Bar */}
           {!readOnly && <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
             {successMessage && (
-              <span className="text-xs font-bold text-emerald-800 flex items-center space-x-1">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>{successMessage}</span>
-              </span>
+              <span className="text-xs font-bold text-emerald-800">{successMessage}</span>
             )}
             {!successMessage && <div />}
 
@@ -640,19 +713,18 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
               <button
                 onClick={handleSaveDraft}
                 disabled={isSaving}
-                className="px-4 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-100 flex items-center space-x-1.5"
+                className="px-4 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-100"
               >
-                <Save className="w-4 h-4" />
-                <span>Enregistrer en Brouillon</span>
+                Enregistrer le brouillon
               </button>
 
               <button
                 onClick={evaluation.status === 'a_corriger' ? handleSubmitCorrection : handleSubmitToDG}
-                disabled={isSaving}
-                className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow-md flex items-center space-x-2"
+                disabled={evaluation.status === 'a_corriger' ? isSaving : !canSubmitToDG}
+                title={!hasInterview && evaluation.status !== 'a_corriger' ? 'Planifiez d’abord l’entretien avec le collaborateur.' : undefined}
+                className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-md"
               >
-                <Send className="w-4 h-4" />
-                <span>{evaluation.status === 'a_corriger' ? 'Terminer la correction et notifier' : 'Soumettre l’Évaluation à la DG'}</span>
+                {evaluation.status === 'a_corriger' ? 'Terminer la correction et notifier' : 'Soumettre l’évaluation à la DG'}
               </button>
             </div>
           </div>}
@@ -663,7 +735,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
           <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-lg space-y-5">
             <div className="border-b border-slate-100 pb-3">
               <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
-                Résumé Permanent
+                Résumé permanent
               </div>
               <div className="text-sm font-black text-slate-900 mt-0.5">Calcul Automatique</div>
             </div>
@@ -721,7 +793,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-sm text-slate-900">➕ Ajouter une Compétence Dynamique</h3>
+              <h3 className="font-bold text-sm text-slate-900">Ajouter une Compétence Dynamique</h3>
               <button onClick={() => setShowAddSkillModal(false)}><X className="w-5 h-5 text-slate-400" /></button>
             </div>
 
@@ -837,7 +909,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-sm text-slate-900">🎯 Ajouter un Objectif pour l'Année Suivante</h3>
+              <h3 className="font-bold text-sm text-slate-900">Ajouter un Objectif pour l'Année Suivante</h3>
               <button onClick={() => setShowAddObjectiveModal(false)}><X className="w-5 h-5 text-slate-400" /></button>
             </div>
 
@@ -896,6 +968,22 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
           </div>
         </div>
       )}
+
+      {!readOnly && showAddImprovementModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b pb-3"><h3 className="font-bold text-sm">Ajouter un axe d'amélioration</h3><button onClick={() => setShowAddImprovementModal(false)}><X className="w-5 h-5 text-slate-400" /></button></div>
+            <div className="space-y-3 text-xs">
+              <div><label className="block font-bold mb-1">Domaine *</label><input value={newImprovementForm.domain} onChange={e => setNewImprovementForm({...newImprovementForm, domain:e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-lg" placeholder="Communication, organisation..." /></div>
+              <div><label className="block font-bold mb-1">Objectif d'amélioration *</label><textarea rows={3} value={newImprovementForm.objective} onChange={e => setNewImprovementForm({...newImprovementForm, objective:e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-lg" /></div>
+              <div><label className="block font-bold mb-1">Commentaire</label><textarea rows={2} value={newImprovementForm.comment} onChange={e => setNewImprovementForm({...newImprovementForm, comment:e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-lg" /></div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t"><button onClick={() => setShowAddImprovementModal(false)} className="px-4 py-2 border rounded-lg text-xs font-bold">Annuler</button><button onClick={handleAddImprovement} className="px-4 py-2 bg-emerald-800 text-white rounded-lg text-xs font-bold">Enregistrer</button></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+

@@ -1,0 +1,34 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('notifications', function (Blueprint $table) {
+            if (!Schema::hasColumn('notifications', 'channel')) {
+                $table->string('channel', 20)->default('platform')->after('type');
+            }
+
+            if (!Schema::hasColumn('notifications', 'link_url')) {
+                $table->string('link_url')->nullable()->after('channel');
+            }
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('notifications', function (Blueprint $table) {
+            if (Schema::hasColumn('notifications', 'link_url')) {
+                $table->dropColumn('link_url');
+            }
+
+            if (Schema::hasColumn('notifications', 'channel')) {
+                $table->dropColumn('channel');
+            }
+        });
+    }
+};

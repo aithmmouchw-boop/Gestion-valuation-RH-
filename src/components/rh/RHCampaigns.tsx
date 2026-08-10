@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Campagne, CampagneStatus, User } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
 import { 
   Plus, Search, Filter, Play, CheckCircle, Archive, 
-  Eye, Edit3, Calendar, AlertCircle, Download, FileSpreadsheet, X, Bell
+  Eye, Edit3, Calendar, AlertCircle, Download, FileSpreadsheet, X, Bell, Trash2
 } from 'lucide-react';
 
 export const RHCampaigns: React.FC = () => {
@@ -100,6 +100,21 @@ export const RHCampaigns: React.FC = () => {
     }
   };
 
+  const handleDeleteCampaign = async (campaign: Campagne) => {
+    const confirmed = confirm(
+      `Confirmer la suppression de la campagne "${campaign.name}" ?\n\nCette action supprimera aussi les évaluations liées à cette campagne.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await apiClient.deleteCampaign(campaign.id);
+      showToast(res.message || 'Campagne supprimée avec succès.');
+      loadCampaigns();
+    } catch (err: any) {
+      showToast(err.message || 'Impossible de supprimer cette campagne.');
+    }
+  };
+
   const handleSaveEdit = async () => {
     if (!editingCampaign) return;
     try {
@@ -133,7 +148,7 @@ export const RHCampaigns: React.FC = () => {
       return false;
     }
     if (dgDeadline > end) {
-      setDateError('La validation DG doit être antérieure à la clôture de la campagne.');
+      setDateError(`La validation DG (${formData.dg_validation_deadline}) doit être antérieure ou égale à la clôture finale (${formData.end_date}).`);
       return false;
     }
 
@@ -231,7 +246,7 @@ export const RHCampaigns: React.FC = () => {
             className="flex items-center space-x-2 px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-lg shadow-md transition-all"
           >
             <Plus className="w-4 h-4" />
-            <span>+ Nouvelle Campagne</span>
+            <span>Nouvelle Campagne</span>
           </button>
         </div>
       </div>
@@ -392,6 +407,14 @@ export const RHCampaigns: React.FC = () => {
                             <Archive className="w-4 h-4" />
                           </button>
                         )}
+
+                        <button
+                          onClick={() => handleDeleteCampaign(c)}
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                          title="Supprimer la campagne"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -497,7 +520,7 @@ export const RHCampaigns: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-700 mb-1">Limite Auto-éval</label>
                       <input
@@ -522,6 +545,15 @@ export const RHCampaigns: React.FC = () => {
                         type="date"
                         value={formData.dg_validation_deadline}
                         onChange={(e) => setFormData({ ...formData, dg_validation_deadline: e.target.value })}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Clôture finale</label>
+                      <input
+                        type="date"
+                        value={formData.end_date}
+                        onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
                         className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                       />
                     </div>
@@ -701,8 +733,8 @@ export const RHCampaigns: React.FC = () => {
                     className="px-5 py-2 bg-emerald-800 text-white font-bold text-xs rounded-lg hover:bg-emerald-900 shadow-md"
                   >
                     {formData.start_date > new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Casablanca' })
-                      ? 'Planifier la Campagne'
-                      : '🚀 Lancer la Campagne'}
+                      ? 'Planifier la campagne'
+                      : 'Lancer la campagne'}
                   </button>
                 )}
               </div>
@@ -904,7 +936,7 @@ export const RHCampaigns: React.FC = () => {
 
       {/* Toast Alert */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center space-x-3 text-xs z-50 animate-bounce">
+        <div className="fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center space-x-3 text-xs z-50">
           <CheckCircle className="w-5 h-5 text-emerald-400" />
           <span className="font-semibold">{toastMessage}</span>
         </div>
@@ -912,3 +944,4 @@ export const RHCampaigns: React.FC = () => {
     </div>
   );
 };
+

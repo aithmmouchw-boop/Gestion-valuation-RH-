@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserRole } from '../types';
-import { 
+import {
   BarChart3, Calendar, FileText, Users, TrendingUp,
   Clock, Settings, UserCheck, ShieldCheck, CheckCircle2, UserRound
 } from 'lucide-react';
@@ -10,9 +10,12 @@ interface SidebarProps {
   activeTab: string;
   onSelectTab: (tab: string) => void;
   pendingCount?: number;
+  isOpen?: boolean;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ role, activeTab, onSelectTab, pendingCount = 0 }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ role, activeTab, onSelectTab, pendingCount = 0, isOpen = true }) => {
+  if (!isOpen) return null;
+
   const renderRhNav = () => (
     <>
       <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
@@ -219,7 +222,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, activeTab, onSelectTab, 
   );
 
   return (
-    <aside className="w-64 bg-slate-900 text-slate-100 flex-shrink-0 flex flex-col justify-between hidden md:flex border-r border-slate-800 min-h-screen">
+    <aside className="w-64 bg-slate-900 text-slate-100 flex-shrink-0 flex flex-col justify-between hidden md:flex border-r border-slate-800 min-h-screen transition-all duration-300">
       <div>
         {/* Brand Logo & Name */}
         <div className="p-5 border-b border-slate-800 flex items-center space-x-3">

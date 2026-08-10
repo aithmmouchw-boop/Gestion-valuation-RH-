@@ -224,6 +224,8 @@ const tableDefinitions = [
     message TEXT NOT NULL,
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     type VARCHAR(100) NOT NULL,
+    channel VARCHAR(20) NOT NULL DEFAULT 'platform',
+    link_url VARCHAR(255) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_notifications_user_read (user_id, is_read),
@@ -366,8 +368,8 @@ export async function initializeProjectSchema(database: string) {
     for (const row of notificationsData) {
       await connection.execute(
         `INSERT IGNORE INTO notifications
-         (id, user_id, title, message, is_read, type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [row.id, row.user_id, row.title, row.message, row.read, row.type, row.created_at],
+         (id, user_id, title, message, is_read, type, channel, link_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [row.id, row.user_id, row.title, row.message, row.read, row.type, row.channel || 'platform', row.link_url || null, row.created_at],
       );
     }
     for (const row of auditLogsData) {

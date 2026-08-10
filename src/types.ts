@@ -14,7 +14,8 @@ export interface User {
   manager_id?: number;
   manager_name?: string;
   avatar: string;
-  category: 'Cadre' | 'Manager' | 'Technicien' | 'Agent';
+  category: 'Employé' | 'Technicien' | 'Agent' | 'Cadre' | 'Cadre dirigeant' | 'Manager';
+  must_change_password?: boolean;
 }
 
 export interface Filiale {
@@ -87,7 +88,9 @@ export type EvaluationStatus =
   | 'en_cours_manager' 
   | 'soumis_dg' 
   | 'valide' 
-  | 'a_corriger';
+  | 'signee'
+  | 'a_corriger'
+  | 'correction_a_confirmer';
 
 export interface EvaluationCompetence {
   id: number;
@@ -182,6 +185,8 @@ export interface NotificationItem {
   message: string;
   read: boolean;
   type: string;
+  channel?: 'platform' | 'email';
+  link_url?: string;
   created_at: string;
 }
 

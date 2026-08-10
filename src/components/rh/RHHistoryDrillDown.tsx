@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { apiClient } from '../../services/apiClient';
 import { User, Evaluation } from '../../types';
 import { UserInitials } from '../UserInitials';
+import { CollaboratorDetailDossier } from '../manager/CollaboratorDetailDossier';
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
 import { PieChart, Pie, Cell } from 'recharts';
 import { 
-  ChevronRight, Building2, Download, FileSpreadsheet, ArrowLeft
+  ChevronRight, Building2, Download, FileSpreadsheet, ArrowLeft, Eye
 } from 'lucide-react';
 
 interface DrillCampaign {
@@ -33,11 +34,13 @@ export const RHHistoryDrillDown: React.FC = () => {
   const [campaigns, setCampaigns] = useState<DrillCampaign[]>([]);
   const [allEvaluations, setAllEvaluations] = useState<Evaluation[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [campaignSearchTerm, setCampaignSearchTerm] = useState('');
 
   // Selected entities for breadcrumb and drill-down
   const [selectedCampaign, setSelectedCampaign] = useState<DrillCampaign | null>(null);
   const [selectedDirectionName, setSelectedDirectionName] = useState<string | null>(null);
   const [selectedManager, setSelectedManager] = useState<User | null>(null);
+  const [selectedEvaluationId, setSelectedEvaluationId] = useState<number | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -161,6 +164,15 @@ export const RHHistoryDrillDown: React.FC = () => {
   const campaignEvaluations = selectedCampaign
     ? allEvaluations.filter(evaluation => evaluation.campagne_id === selectedCampaign.id)
     : [];
+  const filteredCampaigns = campaigns.filter(campaign => {
+    const query = campaignSearchTerm.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      campaign.name.toLowerCase().includes(query) ||
+      campaign.year.toString().includes(query) ||
+      campaign.status.toLowerCase().includes(query)
+    );
+  });
   const scoredCampaignEvaluations = campaignEvaluations.filter(evaluation => evaluation.score_global > 0);
   const completedCampaignEvaluations = campaignEvaluations.filter(evaluation => evaluation.status === 'valide' || evaluation.status === 'soumis_dg');
   const campaignAverage = scoredCampaignEvaluations.length > 0
@@ -200,6 +212,18 @@ export const RHHistoryDrillDown: React.FC = () => {
       ))}
     </div>
   );
+
+  if (selectedEvaluationId !== null) {
+    return (
+      <CollaboratorDetailDossier
+        evaluationId={selectedEvaluationId}
+        onBack={() => setSelectedEvaluationId(null)}
+        readOnly
+        readOnlyContext="rh"
+        showGuidelines={false}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -260,6 +284,18 @@ export const RHHistoryDrillDown: React.FC = () => {
         )}
       </div>
 
+      {level === 1 && (
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
+          <input
+            type="text"
+            value={campaignSearchTerm}
+            onChange={event => setCampaignSearchTerm(event.target.value)}
+            placeholder="Rechercher une campagne par nom, année ou statut..."
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-emerald-600 focus:bg-white"
+          />
+        </div>
+      )}
+
       {/* SCREEN 1: List of Past Campaigns */}
       {level === 1 && (
         <div className="divide-y divide-slate-200 border-y border-slate-200">
@@ -270,7 +306,12 @@ export const RHHistoryDrillDown: React.FC = () => {
             <span>Complétion</span>
             <span></span>
           </div>
-          {campaigns.map(c => (
+          {filteredCampaigns.length === 0 && (
+            <div className="py-12 text-center text-sm text-slate-500">
+              Aucune campagne trouvée.
+            </div>
+          )}
+          {filteredCampaigns.map(c => (
             <button
               key={c.id}
               onClick={() => handleSelectCampaign(c)}
@@ -414,6 +455,7 @@ export const RHHistoryDrillDown: React.FC = () => {
                   <th className="p-4">Filiale</th>
                   <th className="p-4">Statut d'Évaluation</th>
                   <th className="p-4 pr-6">Score Global Calculé</th>
+                  <th className="p-4 pr-6 text-right">Dossier</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -438,6 +480,18 @@ export const RHHistoryDrillDown: React.FC = () => {
                       <td className="p-4 pr-6 font-bold text-emerald-900">
                         {ev?.score_global ? `${ev.score_global} / 100` : 'Non calculé'}
                       </td>
+                      <td className="p-4 pr-6 text-right">
+                        {ev && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedEvaluationId(ev.id)}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white transition-colors hover:bg-emerald-800"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            Voir l'évaluation
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -449,3 +503,4 @@ export const RHHistoryDrillDown: React.FC = () => {
     </div>
   );
 };
+

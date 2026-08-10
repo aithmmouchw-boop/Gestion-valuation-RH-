@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { User, Evaluation } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { UserInitials } from '../UserInitials';
@@ -11,9 +11,10 @@ import {
 interface DGViewProps {
   currentUser: User;
   initialTab?: string;
+  onNavigateTab?: (tab: string) => void;
 }
 
-export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
+export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavigateTab }) => {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [selectedEvalId, setSelectedEvalId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,6 +29,11 @@ export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
       setActiveTab('pending');
     }
   }, [initialTab]);
+
+  const selectDgTab = (tab: 'pending' | 'validated') => {
+    setActiveTab(tab);
+    onNavigateTab?.(tab === 'validated' ? 'dg_archive' : 'dg_queue');
+  };
 
   // Return modal state
   const [rejectingEvalId, setRejectingEvalId] = useState<number | null>(null);
@@ -59,8 +65,8 @@ export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
     );
   }
 
-  const pendingEvals = evaluations.filter(e => e.status === 'soumis_dg');
-  const validatedEvals = evaluations.filter(e => e.status === 'valide');
+  const pendingEvals = evaluations.filter(e => e.status === 'soumis_dg' || e.status === 'signee');
+  const validatedEvals = evaluations.filter(e => e.status === 'valide' || e.status === 'validee');
 
   const handleValidate = async (id: number) => {
     if (confirm('Valider définitivement cette évaluation annuelle ?')) {
@@ -113,7 +119,7 @@ export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
           </span>
           <h1 className="text-2xl font-black mt-2">File d'Attente de Validation des Évaluations</h1>
           <p className="text-xs text-slate-300 mt-1">
-            Examinez et validez les dossiers soumis par les managers de toutes les filiales Groupe Premium.
+            Examinez et validez les dossiers soumis par les managers de votre direction : {currentUser.direction_name || 'Direction Générale'}.
           </p>
         </div>
 
@@ -150,13 +156,13 @@ export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
       {/* Navigation Tabs */}
       <div className="bg-white p-1.5 rounded-xl border border-slate-200/80 shadow-sm flex space-x-2 text-xs font-bold">
         <button
-          onClick={() => setActiveTab('pending')}
+          onClick={() => selectDgTab('pending')}
           className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'pending' ? 'bg-purple-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
         >
           1. File d'Attente Validation ({pendingEvals.length})
         </button>
         <button
-          onClick={() => setActiveTab('validated')}
+          onClick={() => selectDgTab('validated')}
           className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'validated' ? 'bg-emerald-800 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
         >
           2. Évaluations Validées ({validatedEvals.length})
@@ -167,7 +173,7 @@ export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
         /* Pending Validation List */
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden space-y-0">
           <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-900 flex justify-between items-center">
-            <span>Dossiers Soumis à la DG ({pendingEvals.length})</span>
+            <span>Dossiers soumis à la DG ({pendingEvals.length})</span>
             <span className="text-[10px] text-slate-500 font-normal">Action requise</span>
           </div>
 
@@ -241,7 +247,7 @@ export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
           <div className="p-4 bg-emerald-50 border-b border-emerald-200 font-bold text-xs text-emerald-900 flex justify-between items-center">
             <span className="flex items-center space-x-2">
               <ShieldCheck className="w-4 h-4 text-emerald-700" />
-              <span>Dossiers Validés par la Direction Générale ({validatedEvals.length})</span>
+              <span>Dossiers validés par la Direction Générale ({validatedEvals.length})</span>
             </span>
             <span className="text-[10px] text-emerald-700 font-bold uppercase">Archivé Definitif</span>
           </div>
@@ -282,7 +288,7 @@ export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
                       className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow flex items-center space-x-1"
                     >
                       <Eye className="w-4 h-4 text-emerald-400" />
-                      <span>Consulter Dossier</span>
+                      <span>Consulter le dossier</span>
                     </button>
                   </div>
                 </div>
@@ -321,3 +327,4 @@ export const DGView: React.FC<DGViewProps> = ({ initialTab }) => {
     </div>
   );
 };
+

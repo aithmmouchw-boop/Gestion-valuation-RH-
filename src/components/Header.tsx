@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { User, UserRole, NotificationItem } from '../types';
 import { Bell, LogOut, ShieldCheck } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
@@ -82,14 +82,21 @@ export const Header: React.FC<HeaderProps> = ({ currentUser, onLogout }) => {
               </div>
               <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
                 {notifications.length === 0 ? (
-                  <p className="p-4 text-xs text-slate-500 text-center">Aucune notification</p>
+                  <p className="p-4 text-xs text-slate-500 text-center">Aucun message</p>
                 ) : (
                   notifications.map(n => (
-                    <div key={n.id} className="p-3 hover:bg-slate-50 transition-colors">
+                    <a
+                      key={n.id}
+                      href={n.link_url || '#'}
+                      className="block p-3 hover:bg-slate-50 transition-colors"
+                      onClick={event => {
+                        if (!n.link_url) event.preventDefault();
+                      }}
+                    >
                       <div className="font-semibold text-xs text-slate-800">{n.title}</div>
                       <div className="text-[11px] text-slate-600 mt-0.5">{n.message}</div>
                       <div className="text-[9px] text-slate-400 mt-1">{n.created_at}</div>
-                    </div>
+                    </a>
                   ))
                 )}
               </div>
@@ -119,3 +126,4 @@ export const Header: React.FC<HeaderProps> = ({ currentUser, onLogout }) => {
     </header>
   );
 };
+

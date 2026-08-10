@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { User, Evaluation } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { UserInitials } from '../UserInitials';
@@ -182,3 +182,4 @@ export const RHCollaborators: React.FC = () => {
     </div>
   );
 };
+

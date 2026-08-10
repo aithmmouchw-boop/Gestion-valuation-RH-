@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { AtSign, CheckCircle2, Eye, EyeOff, KeyRound, LockKeyhole, UserRound } from 'lucide-react';
 import { User } from '../types';
 import { apiClient } from '../services/apiClient';
@@ -26,8 +26,8 @@ export const MyProfile: React.FC<MyProfileProps> = ({ currentUser }) => {
       setError('La confirmation ne correspond pas au nouveau mot de passe.');
       return;
     }
-    if (newPassword.length < 8) {
-      setError('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+    if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/\d/.test(newPassword) || !/[^A-Za-z0-9]/.test(newPassword)) {
+      setError('Le mot de passe doit contenir au moins 8 caractères, une majuscule, une minuscule, un chiffre et un caractère spécial.');
       return;
     }
 
@@ -95,7 +95,7 @@ export const MyProfile: React.FC<MyProfileProps> = ({ currentUser }) => {
             </div>
             <div>
               <h2 className="font-black text-slate-950">Changer mon mot de passe</h2>
-              <p className="text-xs text-slate-500">Utilisez au minimum 8 caractères.</p>
+              <p className="text-xs text-slate-500">Minimum 8 caractères avec majuscule, minuscule, chiffre et caractère spécial.</p>
             </div>
           </div>
 
@@ -150,3 +150,4 @@ export const MyProfile: React.FC<MyProfileProps> = ({ currentUser }) => {
     </div>
   );
 };
+

@@ -135,6 +135,7 @@ export const RHDashboard: React.FC = () => {
       total: item.total,
     })).filter(item => item.total > 0 || item.evaluated > 0);
   const filteredProgress = getCampaignTimeProgress(selectedCampaignForProgress);
+  const dashboardYear = selectedCampaignForProgress?.year || (selectedYear ? String(selectedYear) : activeCampaign?.year || new Date().getFullYear());
   const pendingOrInProgressCount = filteredEvaluations.length ? filteredEvaluations.length - finalEvaluations.length : kpis.pendingEvaluations;
   const completedCount = finalEvaluations.length || kpis.completedEvaluations;
   const totalCount = filteredEvaluations.length || kpis.totalEvaluations;
@@ -292,7 +293,7 @@ export const RHDashboard: React.FC = () => {
             Direction Capital Humain — Groupe Premium
           </div>
           <h1 className="text-2xl font-black text-slate-900 mt-1">
-            Tableau de Bord Global — Performance 2025
+            Tableau de Bord Global — Performance {dashboardYear}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
             Suivi en temps réel des campagnes d'évaluation (Casablanca, Agadir, Meknès, Kénitra, Tanger)

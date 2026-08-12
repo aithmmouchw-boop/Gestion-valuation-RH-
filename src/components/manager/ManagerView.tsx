@@ -1,10 +1,10 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { User, Evaluation } from '../../types';
+import { User, Evaluation, Campagne } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { UserInitials } from '../UserInitials';
 import { CollaboratorDetailDossier } from './CollaboratorDetailDossier';
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
-import { Search, Filter, Download, FileSpreadsheet, ArrowRight, Trash2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Search, Filter, Download, FileSpreadsheet, ArrowRight, AlertTriangle, RefreshCw, Users, CalendarCheck, CheckCircle2, Clock } from 'lucide-react';
 
 interface ManagerViewProps {
   currentUser: User;
@@ -14,10 +14,15 @@ interface ManagerViewProps {
 
 export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTab, onNavigateTab }) => {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [campaigns, setCampaigns] = useState<Campagne[]>([]);
   const [selectedEvalId, setSelectedEvalId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [campaignFilter, setCampaignFilter] = useState('all');
+  const [posteFilter, setPosteFilter] = useState('all');
+  const [familyFilter, setFamilyFilter] = useState('all');
+  const [collaboratorFilter, setCollaboratorFilter] = useState('all');
   const [currentTab, setCurrentTab] = useState<'active' | 'history'>(
     initialTab === 'past_campaigns' ? 'history' : 'active'
   );
@@ -37,17 +42,14 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
 
   const loadTeamEvaluations = () => {
     setLoading(true);
-    apiClient.getEvaluations({ manager_id: currentUser.id.toString() }).then(res => {
-      setEvaluations(res);
+    Promise.all([
+      apiClient.getEvaluations({ manager_id: currentUser.id.toString() }),
+      apiClient.getCampaigns(),
+    ]).then(([res, campaignRes]) => {
+      setEvaluations(res.filter(evaluation => evaluation.manager_id === currentUser.id));
+      setCampaigns(campaignRes);
       setLoading(false);
     }).catch(console.error);
-  };
-
-  const handleDeleteEvaluation = async (id: number, name: string) => {
-    if (confirm(`Êtes-vous sûr de vouloir supprimer l'évaluation de ${name} ?`)) {
-      await apiClient.deleteEvaluation(id);
-      loadTeamEvaluations();
-    }
   };
 
   useEffect(() => {
@@ -58,6 +60,8 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
     return (
       <CollaboratorDetailDossier
         evaluationId={selectedEvalId}
+        readOnly={['valide', 'validee'].includes(evaluations.find(evaluation => evaluation.id === selectedEvalId)?.status || '')}
+        readOnlyContext="dg"
         onBack={() => {
           setSelectedEvalId(null);
           loadTeamEvaluations();
@@ -69,11 +73,41 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
   const filteredEvals = evaluations.filter(e => {
     const matchesSearch = e.user_name.toLowerCase().includes(searchTerm.toLowerCase()) || e.poste_name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || e.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesCampaign = campaignFilter === 'all' || e.campagne_id.toString() === campaignFilter;
+    const matchesPoste = posteFilter === 'all' || e.poste_name === posteFilter;
+    const matchesFamily = familyFilter === 'all' || e.direction_name === familyFilter;
+    const matchesCollaborator = collaboratorFilter === 'all' || e.user_name === collaboratorFilter;
+    return matchesSearch && matchesStatus && matchesCampaign && matchesPoste && matchesFamily && matchesCollaborator;
   });
   const historicalEvaluations = evaluations.filter(evaluation =>
     evaluation.score_global > 0 && (evaluation.status === 'valide' || evaluation.status === 'soumis_dg' || evaluation.status === 'signee'),
   );
+  const uniquePostes = Array.from(new Set(evaluations.map(e => e.poste_name).filter(Boolean))).sort();
+  const uniqueFamilies = Array.from(new Set(evaluations.map(e => e.direction_name).filter(Boolean))).sort();
+  const uniqueCollaborators = Array.from(new Set(evaluations.map(e => e.user_name).filter(Boolean))).sort();
+  const managerKpis = {
+    total: filteredEvals.length,
+    completed: filteredEvals.filter(e => ['valide', 'validee'].includes(e.status)).length,
+    pending: filteredEvals.filter(e => !['valide', 'validee'].includes(e.status)).length,
+    plannedInterviews: filteredEvals.filter(e => e.interview_status === 'planifie' || Boolean(e.interview_date)).length,
+    doneInterviews: filteredEvals.filter(e => e.interview_status === 'realise').length,
+    returned: filteredEvals.filter(e => e.status === 'a_corriger').length,
+    submittedDG: filteredEvals.filter(e => e.status === 'soumis_dg' || e.status === 'signee').length,
+    validatedDG: filteredEvals.filter(e => e.status === 'dg_validee').length,
+    waitingCollaborator: filteredEvals.filter(e => ['dg_validee', 'correction_a_confirmer'].includes(e.status)).length,
+  };
+  const percentOfTeam = (value: number) => managerKpis.total > 0 ? Math.round((value / managerKpis.total) * 100) : 0;
+  const statCards = [
+    { label: 'Collaborateurs', value: managerKpis.total, detail: 'Équipe filtrée', icon: Users, accent: 'text-emerald-300', bar: 100 },
+    { label: 'Évaluations terminées', value: managerKpis.completed, detail: `${percentOfTeam(managerKpis.completed)}% de l’équipe`, icon: CheckCircle2, accent: 'text-emerald-300', bar: percentOfTeam(managerKpis.completed) },
+    { label: 'Évaluations en attente', value: managerKpis.pending, detail: `${percentOfTeam(managerKpis.pending)}% de l’équipe`, icon: Clock, accent: 'text-amber-300', bar: percentOfTeam(managerKpis.pending) },
+    { label: 'Entretiens planifiés', value: managerKpis.plannedInterviews, detail: `${percentOfTeam(managerKpis.plannedInterviews)}% de l’équipe`, icon: CalendarCheck, accent: 'text-blue-300', bar: percentOfTeam(managerKpis.plannedInterviews) },
+    { label: 'Entretiens réalisés', value: managerKpis.doneInterviews, detail: `${percentOfTeam(managerKpis.doneInterviews)}% de l’équipe`, icon: CheckCircle2, accent: 'text-emerald-300', bar: percentOfTeam(managerKpis.doneInterviews) },
+    { label: 'À corriger', value: managerKpis.returned, detail: `${managerKpis.returned} dossier(s) retourné(s)`, icon: AlertTriangle, accent: 'text-rose-300', bar: percentOfTeam(managerKpis.returned) },
+    { label: 'Soumis à la DG', value: managerKpis.submittedDG, detail: `${percentOfTeam(managerKpis.submittedDG)}% de l’équipe`, icon: RefreshCw, accent: 'text-purple-300', bar: percentOfTeam(managerKpis.submittedDG) },
+    { label: 'Validés par la DG', value: managerKpis.validatedDG, detail: 'En attente de validation finale', icon: CheckCircle2, accent: 'text-emerald-300', bar: percentOfTeam(managerKpis.validatedDG) },
+    { label: 'Validation collaborateur', value: managerKpis.waitingCollaborator, detail: 'En attente de signature', icon: Clock, accent: 'text-blue-300', bar: percentOfTeam(managerKpis.waitingCollaborator) },
+  ];
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -97,7 +131,7 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
   };
 
   const handleExportPDF = () => {
-    const headers = ['Collaborateur', 'Poste', 'Département', 'Statut Auto-éval', 'Statut Évaluation', 'Moyenne'];
+    const headers = ['Collaborateur', 'Poste', 'Famille', 'Statut Auto-éval', 'Statut Évaluation', 'Moyenne'];
     const rows = filteredEvals.map(e => [
       e.user_name,
       e.poste_name,
@@ -110,7 +144,7 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
   };
 
   const handleExportExcel = () => {
-    const headers = ['Collaborateur', 'Poste', 'Département', 'Statut Auto-éval', 'Statut Évaluation', 'Moyenne'];
+    const headers = ['Collaborateur', 'Poste', 'Famille', 'Statut Auto-éval', 'Statut Évaluation', 'Moyenne'];
     const rows = filteredEvals.map(e => [
       e.user_name,
       e.poste_name,
@@ -143,6 +177,97 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
             <FileSpreadsheet className="w-4 h-4" />
             <span>Excel</span>
           </button>
+        </div>
+      </div>
+
+      {/* Filter & Search Bar */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Rechercher par nom ou poste..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white"
+          />
+        </div>
+
+        <div className="flex items-center space-x-2 text-xs">
+          <Filter className="w-4 h-4 text-slate-400" />
+          <select
+            value={campaignFilter}
+            onChange={(e) => setCampaignFilter(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-medium"
+          >
+            <option value="all">Toutes les campagnes</option>
+            {campaigns.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+          </select>
+        </div>
+
+        <select value={posteFilter} onChange={(e) => setPosteFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium">
+          <option value="all">Tous les postes</option>
+          {uniquePostes.map(poste => <option key={poste} value={poste}>{poste}</option>)}
+        </select>
+
+        <select value={familyFilter} onChange={(e) => setFamilyFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium">
+          <option value="all">Toutes les familles</option>
+          {uniqueFamilies.map(family => <option key={family} value={family}>{family}</option>)}
+        </select>
+
+        <select value={collaboratorFilter} onChange={(e) => setCollaboratorFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium">
+          <option value="all">Tous les collaborateurs</option>
+          {uniqueCollaborators.map(collaborator => <option key={collaborator} value={collaborator}>{collaborator}</option>)}
+        </select>
+
+        <div className="flex items-center space-x-2 text-xs">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-medium"
+          >
+            <option value="all">Tous les statuts</option>
+            <option value="en_attente">En attente</option>
+            <option value="auto_eval_terminee">Auto-éval terminée</option>
+            <option value="en_cours_manager">En cours manager</option>
+            <option value="soumis_dg">Soumis DG</option>
+            <option value="dg_validee">En attente collaborateur</option>
+            <option value="a_corriger">À corriger</option>
+            <option value="valide">Terminé & Validé</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="rounded-3xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-950 p-6 shadow-lg border border-slate-800">
+        <div className="flex items-center space-x-3 mb-5">
+          <Users className="w-5 h-5 text-emerald-400" />
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-[0.22em] text-emerald-300">Tableau de bord manager</h2>
+            <p className="text-xs text-slate-300 mt-1">Suivi clair de l’état des évaluations de votre équipe.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {statCards.map(({ label, value, detail, icon: Icon, accent, bar }) => (
+            <div key={label} className="rounded-2xl border border-white/10 bg-white/10 p-5 shadow-sm backdrop-blur-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-extrabold text-slate-100">{label}</div>
+                  <div className="mt-4 flex items-end space-x-2">
+                    <span className="text-4xl font-black text-white">{value}</span>
+                    <span className="pb-1 text-sm font-semibold text-slate-300">/ {managerKpis.total || 0}</span>
+                  </div>
+                </div>
+                <div className="rounded-lg bg-emerald-400/10 px-3 py-2">
+                  <Icon className={`w-5 h-5 ${accent}`} />
+                </div>
+              </div>
+              <div className="mt-4 h-2 rounded-full bg-white/20 overflow-hidden">
+                <div className="h-full rounded-full bg-emerald-400 transition-all duration-500" style={{ width: `${Math.min(bar, 100)}%` }} />
+              </div>
+              <div className="mt-2 text-xs font-semibold text-slate-300">{detail}</div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -224,37 +349,6 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Filter & Search Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-wrap items-center justify-between gap-4">
-        <div className="relative flex-1 min-w-[240px]">
-          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Rechercher par nom ou poste..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white"
-          />
-        </div>
-
-        <div className="flex items-center space-x-2 text-xs">
-          <Filter className="w-4 h-4 text-slate-400" />
-          <span className="font-semibold text-slate-600">Statut:</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-medium"
-          >
-            <option value="all">Tous les statuts</option>
-            <option value="en_attente">En attente</option>
-            <option value="auto_eval_terminee">Auto-éval terminée</option>
-            <option value="en_cours_manager">En cours manager</option>
-            <option value="soumis_dg">Soumis DG</option>
-            <option value="valide">Terminé & Validé</option>
-          </select>
-        </div>
-      </div>
-
       {/* Liste alignée des collaborateurs */}
       {loading ? (
         <div className="p-8 text-center text-slate-500">Chargement de votre équipe...</div>
@@ -303,20 +397,33 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
                 </span>
               </div>
 
-              <div className="flex items-center lg:justify-end space-x-2">
+              <div className="flex flex-wrap items-center lg:justify-end gap-2">
                 <button
                   onClick={() => setSelectedEvalId(ev.id)}
                   className="px-3 py-2 bg-slate-900 hover:bg-emerald-900 text-white font-bold text-xs rounded-lg transition-all flex items-center justify-center space-x-2 group"
                 >
-                  <span>Consulter</span>
+                  <span>Voir le dossier</span>
                   <ArrowRight className="w-4 h-4 text-emerald-400 group-hover:translate-x-1 transition-transform" />
                 </button>
                 <button
-                  onClick={() => handleDeleteEvaluation(ev.id, ev.user_name)}
-                  className="p-2 bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700 rounded-lg transition-colors border border-slate-200"
-                  title="Supprimer l'évaluation"
+                  onClick={() => setSelectedEvalId(ev.id)}
+                  disabled={['valide', 'validee'].includes(ev.status)}
+                  className="px-3 py-2 bg-amber-100 hover:bg-amber-200 disabled:bg-slate-100 disabled:text-slate-400 text-amber-900 font-bold text-xs rounded-lg transition-colors"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  {ev.score_global > 0 ? "Modifier l'évaluation" : "Commencer l'évaluation"}
+                </button>
+                <button
+                  onClick={() => setSelectedEvalId(ev.id)}
+                  disabled={['valide', 'validee'].includes(ev.status)}
+                  className="px-3 py-2 bg-blue-50 hover:bg-blue-100 disabled:bg-slate-100 disabled:text-slate-400 text-blue-900 font-bold text-xs rounded-lg transition-colors"
+                >
+                  Planifier l'entretien
+                </button>
+                <button
+                  onClick={() => selectManagerTab('history')}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-colors"
+                >
+                  Historique
                 </button>
               </div>
             </div>

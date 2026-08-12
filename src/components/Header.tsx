@@ -110,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({ currentUser, onLogout }) => {
           <div className="hidden lg:block text-left">
             <div className="text-xs font-bold text-slate-900">{currentUser.name}</div>
             <div className="text-[10px] font-semibold text-slate-500 truncate max-w-[230px]">
-              {getRoleLabel(currentUser.role)} · {currentUser.direction_name || 'Département non renseigné'}
+              {getRoleLabel(currentUser.role)} · {currentUser.direction_name || 'Famille non renseigné'}
             </div>
           </div>
 

@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { BesoinFormation, Evaluation, EvaluationCompetence, Objectif } from '../../types';
 import { apiClient } from '../../services/apiClient';
-import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
+import { exportDossierEvaluationPDF, exportToExcel } from '../../utils/exportUtils';
 import { AlertCircle, Plus, Trash2, X } from 'lucide-react';
 
 interface CollaboratorDetailDossierProps {
@@ -31,6 +31,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   const [successMessage, setSuccessMessage] = useState('');
   const [interviewDate, setInterviewDate] = useState('');
   const [interviewMessage, setInterviewMessage] = useState('Reunion pour discuter ensemble de votre auto-evaluation annuelle.');
+  const [interviewStatus, setInterviewStatus] = useState<'planifie' | 'realise' | 'reporte' | 'annule'>('planifie');
 
   // Modals for adding
   const [showAddSkillModal, setShowAddSkillModal] = useState(false);
@@ -80,14 +81,20 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   const scoreSavoirFaire = calcAvg(savoirFaires);
   const scoreSavoirEtre = calcAvg(savoirEtres);
   const scoreGlobal = Math.round((scoreSavoir * 0.20 + scoreSavoirFaire * 0.50 + scoreSavoirEtre * 0.30) * 10) / 10;
+  const sortedCompetences = [...evaluation.competences].filter(c => Number(c.score) > 0).sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+  const suggestedStrengths = sortedCompetences.slice(0, 3).map(c => c.name).join('\n');
+  const suggestedImprovements = [...sortedCompetences].reverse().slice(0, 3).map(c => c.name).join('\n');
   const hasInterview = Boolean(evaluation.interview_date);
-  const canSubmitToDG = !isSaving && hasInterview;
+  const isInterviewDone = evaluation.interview_status === 'realise';
+  const canSubmitToDG = !isSaving && hasInterview && isInterviewDone;
   const evaluationWithScores = (): Evaluation => ({
     ...evaluation,
     score_savoir: scoreSavoir,
     score_savoir_faire: scoreSavoirFaire,
     score_savoir_etre: scoreSavoirEtre,
     score_global: scoreGlobal,
+    synthesis_points_forts: evaluation.synthesis_points_forts || suggestedStrengths,
+    synthesis_points_ameliorer: evaluation.synthesis_points_ameliorer || suggestedImprovements,
   });
 
   const handleScoreChange = (compId: number, newScore: number) => {
@@ -190,6 +197,17 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
     setEvaluation(res.evaluation || res);
   };
 
+  const countLines = (value?: string) => (value || '').split(/\r?\n|;/).map(item => item.trim()).filter(Boolean).length;
+  const validateOfficialSynthesis = () => {
+    const pointsForts = evaluation.synthesis_points_forts || suggestedStrengths;
+    const pointsAmeliorer = evaluation.synthesis_points_ameliorer || suggestedImprovements;
+    if (countLines(pointsForts) < 3) return 'Renseignez au moins 3 points forts dans la synthèse officielle.';
+    if (countLines(pointsAmeliorer) < 3) return 'Renseignez au moins 3 points à améliorer dans la synthèse officielle.';
+    if (!evaluation.synthesis_developpement?.trim()) return 'Renseignez le développement à envisager.';
+    if (!evaluation.summary_comment?.trim()) return "Renseignez l'appréciation globale du manager.";
+    return '';
+  };
+
   const handleSaveDraft = async () => {
     setIsSaving(true);
     try {
@@ -208,7 +226,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
     if (!interviewDate) return;
     setIsSaving(true);
     try {
-      const result = await apiClient.scheduleInterview(evaluation.id, interviewDate, interviewMessage);
+      const result = await apiClient.scheduleInterview(evaluation.id, interviewDate, interviewMessage, interviewStatus);
       setEvaluation(result.evaluation);
       setSuccessMessage(result.message);
       setTimeout(() => setSuccessMessage(''), 4000);
@@ -218,14 +236,20 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   };
 
   const handleSubmitToDG = async () => {
-    if (!hasInterview) {
-      setSuccessMessage('Planifiez d’abord l’entretien avec le collaborateur avant de soumettre à la DG.');
+    if (!hasInterview || !isInterviewDone) {
+      setSuccessMessage('Planifiez l’entretien et marquez son statut comme réalisé avant de soumettre à la DG.');
       return;
     }
     const firstIncomplete = evaluation.competences.find(competence => Number(competence.score) <= 0);
     if (firstIncomplete) {
       setActiveTab(firstIncomplete.axe);
       setSuccessMessage(`Complétez d’abord toutes les notes de l’axe ${firstIncomplete.axe.replace('_', '-')}.`);
+      return;
+    }
+    const synthesisError = validateOfficialSynthesis();
+    if (synthesisError) {
+      setActiveTab('resume');
+      setSuccessMessage(synthesisError);
       return;
     }
     const firstMissingComment = evaluation.competences.find(competence => !competence.comment?.trim());
@@ -279,24 +303,43 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   };
 
   const handleExportPDF = () => {
-    const headers = ['Axe', 'Compétence', 'Note', 'Commentaire'];
-    const rows = evaluation.competences.map(c => [
-      c.axe.toUpperCase().replace('_', '-'),
-      c.name,
-      `${c.score}/100`,
-      c.comment || '-'
-    ]);
-    exportToPDF(`Dossier RH — ${evaluation.user_name}`, headers, rows, `dossier_${evaluation.user_name}`);
+    const headers = ['Rubrique', 'Contenu'];
+    const managerValidated = evaluation.score_global > 0 ? 'Validée par le manager' : 'Non finalisée';
+    const collaboratorSignature = evaluation.signed_at_user ? `Signée le ${evaluation.signed_at_user}` : 'Non signée';
+    const dgValidation = evaluation.validated_at_dg ? `Contenu validé le ${evaluation.validated_at_dg}` : 'Non validé';
+    const rows = [
+      ['Points forts', evaluation.synthesis_points_forts || suggestedStrengths || '-'],
+      ['Points à améliorer', evaluation.synthesis_points_ameliorer || suggestedImprovements || '-'],
+      ['Développement à envisager', evaluation.synthesis_developpement || '-'],
+      ['Appréciation globale et commentaires du manager', evaluation.summary_comment || '-'],
+    ];
+    exportDossierEvaluationPDF(
+      `Dossier RH - ${evaluation.user_name}`,
+      headers,
+      rows,
+      [
+        { role: 'Collaborateur', name: evaluation.user_name, status: collaboratorSignature, comment: 'Prise de connaissance du dossier' },
+        { role: 'Manager évaluateur', name: evaluation.manager_name, status: managerValidated, comment: 'Évaluation managériale' },
+        { role: 'Direction Générale', name: 'Validation du contenu', status: dgValidation, comment: evaluation.dg_comment || 'Validation du contenu de l’évaluation' },
+      ],
+      `dossier_${evaluation.user_name}`
+    );
   };
 
   const handleExportExcel = () => {
-    const headers = ['Axe', 'Compétence', 'Note', 'Commentaire'];
-    const rows = evaluation.competences.map(c => [
-      c.axe.toUpperCase().replace('_', '-'),
-      c.name,
-      `${c.score}/100`,
-      c.comment || '-'
-    ]);
+    const headers = ['Rubrique', 'Contenu'];
+    const managerValidated = evaluation.score_global > 0 ? 'Validée par le manager' : 'Non finalisée';
+    const collaboratorSignature = evaluation.signed_at_user ? `Signée le ${evaluation.signed_at_user}` : 'Non signée';
+    const dgValidation = evaluation.validated_at_dg ? `Contenu validé le ${evaluation.validated_at_dg}` : 'Non validé';
+    const rows = [
+      ['Points forts', evaluation.synthesis_points_forts || suggestedStrengths || '-'],
+      ['Points à améliorer', evaluation.synthesis_points_ameliorer || suggestedImprovements || '-'],
+      ['Développement à envisager', evaluation.synthesis_developpement || '-'],
+      ['Appréciation globale et commentaires du manager', evaluation.summary_comment || '-'],
+      ['Validation Collaborateur', collaboratorSignature],
+      ['Validation Manager', managerValidated],
+      ['Validation Direction Générale', dgValidation],
+    ];
     exportToExcel(`Dossier ${evaluation.user_name}`, headers, rows, `dossier_${evaluation.user_name}`);
   };
 
@@ -311,10 +354,10 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
           Retour a la liste des collaborateurs
         </button>
 
-        <div className="flex items-center space-x-2">
+        {readOnlyContext === 'rh' && <div className="flex items-center space-x-2">
           <button onClick={handleExportPDF} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg">PDF</button>
           <button onClick={handleExportExcel} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg">Excel</button>
-        </div>
+        </div>}
       </div>
 
       {/* Main Digital RH File Header & Permanent Sticky Summary Sidebar Layout */}
@@ -371,15 +414,21 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                 <h3 className="font-bold text-sm text-indigo-950">Entretien individuel avec {evaluation.user_name}</h3>
                 <p className="text-[11px] text-indigo-800 mt-0.5">
                   {evaluation.interview_date
-                    ? `Entretien planifie le ${new Date(evaluation.interview_date).toLocaleString('fr-FR')}. Les notes manager sont deverrouillees.`
+                    ? `Entretien planifié le ${new Date(evaluation.interview_date).toLocaleString('fr-FR')}. Statut : ${evaluation.interview_status === 'realise' ? 'réalisé' : evaluation.interview_status || 'planifié'}.`
                     : 'Planifiez l’entretien pour notifier le collaborateur et déverrouiller la notation manager.'}
                 </p>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-[220px_1fr_150px_auto] gap-2">
                 <input type="datetime-local" value={interviewDate} onChange={event => setInterviewDate(event.target.value)} className="p-2 rounded-lg border border-indigo-200 bg-white text-xs" />
                 <input type="text" value={interviewMessage} onChange={event => setInterviewMessage(event.target.value)} className="p-2 rounded-lg border border-indigo-200 bg-white text-xs" placeholder="Message de la réunion" />
+                <select value={interviewStatus} onChange={event => setInterviewStatus(event.target.value as 'planifie' | 'realise' | 'reporte' | 'annule')} className="p-2 rounded-lg border border-indigo-200 bg-white text-xs font-semibold">
+                  <option value="planifie">Planifié</option>
+                  <option value="realise">Réalisé</option>
+                  <option value="reporte">Reporté</option>
+                  <option value="annule">Annulé</option>
+                </select>
                 <button onClick={handleScheduleInterview} disabled={!interviewDate || isSaving} className="px-4 py-2 rounded-lg bg-indigo-900 disabled:bg-slate-400 text-white font-bold text-xs">
-                  Planifier et notifier
+                  Enregistrer et notifier
                 </button>
               </div>
             </div>
@@ -448,25 +497,35 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
           {/* 1. Résumé */}
           {activeTab === 'resume' && (
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
-              <h3 className="font-bold text-sm text-slate-900">Résumé général et synthèse manager</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {evaluation.summary_comment || 'Aucune appréciation globale renseignée pour le moment.'}
-              </p>
-
-              {!readOnly && <div className="pt-4 border-t border-slate-100">
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Appréciation Générale du Manager
-                </label>
-                <textarea
-                  rows={3}
-                  value={evaluation.summary_comment || ''}
-                  onChange={(e) => setEvaluation({ ...evaluation, summary_comment: e.target.value })}
-                  placeholder="Rédigez un commentaire de synthèse sur la performance de l'année..."
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>}
+              <h3 className="font-bold text-sm text-slate-900">Synthèse officielle de l'évaluation</h3>
+              <div className="grid grid-cols-1 gap-4">
+                {[
+                  ['Points forts', 'synthesis_points_forts', suggestedStrengths || 'Minimum 3 points forts.'],
+                  ['Points à améliorer', 'synthesis_points_ameliorer', suggestedImprovements || 'Minimum 3 points à améliorer.'],
+                  ['Développement à envisager', 'synthesis_developpement', 'Formation, évolution, réaffectation ou accompagnement proposé.'],
+                  ['Appréciation globale et commentaires du manager', 'summary_comment', "Rédigez l'appréciation globale du manager."],
+                ].map(([label, key, placeholder]) => (
+                  <div key={key} className="space-y-1">
+                    <label className="block text-xs font-bold text-slate-700">{label}</label>
+                    {readOnly ? (
+                      <div className="min-h-[56px] whitespace-pre-line rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                        {(evaluation as any)[key] || 'Non renseigné.'}
+                      </div>
+                    ) : (
+                      <textarea
+                        rows={key === 'summary_comment' ? 4 : 3}
+                        value={(evaluation as any)[key] || (key === 'synthesis_points_forts' ? suggestedStrengths : key === 'synthesis_points_ameliorer' ? suggestedImprovements : '')}
+                        onChange={(e) => setEvaluation({ ...evaluation, [key]: e.target.value } as Evaluation)}
+                        placeholder={placeholder}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:ring-2 focus:ring-emerald-500"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
+
 
           {/* 2. Auto-évaluation (Consultable uniquement) */}
           {activeTab === 'auto_eval' && (
@@ -647,11 +706,28 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
                 </button>}
               </div>
 
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                <h4 className="text-xs font-black uppercase tracking-wider text-blue-900">Objectifs de l'année précédente</h4>
+                <div className="mt-3 space-y-2">
+                  {evaluation.objectifs.filter(o => !o.is_next_year).length === 0 ? (
+                    <p className="text-xs text-blue-800">Aucun objectif précédent n'est disponible pour cette évaluation.</p>
+                  ) : (
+                    evaluation.objectifs.filter(o => !o.is_next_year).map(o => (
+                      <div key={o.id} className="rounded-xl bg-white p-3 text-xs border border-blue-100">
+                        <div className="font-bold text-slate-900">{o.title}</div>
+                        <div className="text-slate-600 mt-1">{o.description}</div>
+                        <div className="text-slate-500 mt-1">Réalisation : <strong>{o.progress}%</strong> — {o.status}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
               <div className="space-y-3">
-                {evaluation.objectifs.length === 0 ? (
+                {evaluation.objectifs.filter(o => o.is_next_year).length === 0 ? (
                   <p className="text-xs text-slate-400 italic">Aucun objectif défini pour l'année suivante.</p>
                 ) : (
-                  evaluation.objectifs.map(o => (
+                  evaluation.objectifs.filter(o => o.is_next_year).map(o => (
                     <div key={o.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs flex justify-between items-center hover:border-slate-300 transition-all">
                       <div className="space-y-1">
                         <div className="font-bold text-slate-900 text-sm">{o.title}</div>
@@ -721,62 +797,34 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
               <button
                 onClick={evaluation.status === 'a_corriger' ? handleSubmitCorrection : handleSubmitToDG}
                 disabled={evaluation.status === 'a_corriger' ? isSaving : !canSubmitToDG}
-                title={!hasInterview && evaluation.status !== 'a_corriger' ? 'Planifiez d’abord l’entretien avec le collaborateur.' : undefined}
+                title={(!hasInterview || !isInterviewDone) && evaluation.status !== 'a_corriger' ? 'Planifiez et marquez l’entretien comme réalisé.' : undefined}
                 className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-md"
               >
-                {evaluation.status === 'a_corriger' ? 'Terminer la correction et notifier' : 'Soumettre l’évaluation à la DG'}
+                {evaluation.status === 'a_corriger' ? 'Terminer la correction et renvoyer à la DG' : 'Soumettre l’évaluation à la DG'}
               </button>
             </div>
           </div>}
         </div>
 
-        {/* Right 1 Column: PERMANENT STICKY SUMMARY CARD (Visible at all times during consultation) */}
+        {/* Right 1 Column: permanent official synthesis card */}
         <div className="lg:col-span-1 sticky top-20 space-y-4">
           <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-lg space-y-5">
             <div className="border-b border-slate-100 pb-3">
               <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
                 Résumé permanent
               </div>
-              <div className="text-sm font-black text-slate-900 mt-0.5">Calcul Automatique</div>
+              <div className="text-sm font-black text-slate-900 mt-0.5">Synthèse officielle</div>
             </div>
 
-            {/* Score Gauges */}
             <div className="space-y-3 text-xs">
               <div>
-                <div className="flex justify-between font-bold text-slate-700">
-                  <span>Savoir (20%)</span>
-                  <span className="text-blue-800">{scoreSavoir}%</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2 rounded-full mt-1 overflow-hidden">
-                  <div className="bg-blue-600 h-full rounded-full" style={{ width: `${scoreSavoir}%` }}></div>
-                </div>
+                <div className="font-bold text-slate-700">Points forts</div>
+                <div className="mt-1 whitespace-pre-line rounded-xl bg-slate-50 p-3 text-slate-600">{evaluation.synthesis_points_forts || suggestedStrengths || 'Non renseigné.'}</div>
               </div>
-
               <div>
-                <div className="flex justify-between font-bold text-slate-700">
-                  <span>Savoir-faire (50%)</span>
-                  <span className="text-emerald-800">{scoreSavoirFaire}%</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2 rounded-full mt-1 overflow-hidden">
-                  <div className="bg-emerald-600 h-full rounded-full" style={{ width: `${scoreSavoirFaire}%` }}></div>
-                </div>
+                <div className="font-bold text-slate-700">Points à améliorer</div>
+                <div className="mt-1 whitespace-pre-line rounded-xl bg-slate-50 p-3 text-slate-600">{evaluation.synthesis_points_ameliorer || suggestedImprovements || 'Non renseigné.'}</div>
               </div>
-
-              <div>
-                <div className="flex justify-between font-bold text-slate-700">
-                  <span>Savoir-être (30%)</span>
-                  <span className="text-purple-800">{scoreSavoirEtre}%</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2 rounded-full mt-1 overflow-hidden">
-                  <div className="bg-purple-600 h-full rounded-full" style={{ width: `${scoreSavoirEtre}%` }}></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Final Overall Weighted Score */}
-            <div className="p-4 bg-gradient-to-br from-slate-900 to-emerald-950 text-white rounded-2xl text-center shadow-md space-y-1">
-              <div className="text-[10px] font-bold uppercase text-emerald-400">Moyenne Finale Pondérée</div>
-              <div className="text-3xl font-black text-white">{scoreGlobal} <span className="text-xs text-slate-300 font-normal">/ 100</span></div>
             </div>
 
             <div className="text-center pt-2">
@@ -843,7 +891,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-sm text-slate-900">🎓 Ajouter un Besoin de Formation</h3>
+              <h3 className="font-bold text-sm text-slate-900">Ajouter un besoin de formation</h3>
               <button onClick={() => setShowAddTrainingModal(false)}><X className="w-5 h-5 text-slate-400" /></button>
             </div>
 

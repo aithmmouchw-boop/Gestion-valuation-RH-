@@ -37,7 +37,7 @@ export const RHDepartmentManagement: React.FC = () => {
 
   const handleCreateDirection = async () => {
     if (!dirForm.name) {
-      alert('Veuillez saisir le nom du département/direction.');
+      alert('Veuillez saisir le nom du famille/direction.');
       return;
     }
     await apiClient.createDirection({
@@ -82,7 +82,7 @@ export const RHDepartmentManagement: React.FC = () => {
   const handleExportExcel = () => {
     const headers = ['Nom Direction', 'Code'];
     const rows = filteredDirections.map(d => [d.name, d.code]);
-    exportToExcel('Directions & Départements', headers, rows, 'directions_groupe_premium');
+    exportToExcel('Directions & Familles', headers, rows, 'directions_groupe_premium');
   };
 
   return (
@@ -92,7 +92,7 @@ export const RHDepartmentManagement: React.FC = () => {
         <div>
           <h1 className="text-2xl font-black text-slate-900 flex items-center space-x-2">
             <Building2 className="w-6 h-6 text-emerald-800" />
-            <span>Gestion des Départements & Filiales</span>
+            <span>Gestion des Familles & Filiales</span>
           </h1>
           <p className="text-xs text-slate-500 mt-1">
             Structure organisationnelle, découpage des directions métier et entités du Groupe Premium.
@@ -113,7 +113,7 @@ export const RHDepartmentManagement: React.FC = () => {
             className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl flex items-center space-x-2 shadow-md transition-colors"
           >
             <Plus className="w-4 h-4" />
-            <span>Ajouter un Département</span>
+            <span>Ajouter une famille</span>
           </button>
           <button 
             onClick={() => setShowAddFilialeModal(true)}
@@ -126,19 +126,19 @@ export const RHDepartmentManagement: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Directions / Départements List */}
+        {/* Directions / Familles List */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center space-x-2">
               <Layers className="w-5 h-5 text-emerald-800" />
-              <h2 className="font-bold text-base text-slate-900">Départements ({filteredDirections.length})</h2>
+              <h2 className="font-bold text-base text-slate-900">Familles ({filteredDirections.length})</h2>
             </div>
             <button
               onClick={() => setShowAddDirModal(true)}
               className="text-xs font-bold text-emerald-800 hover:underline flex items-center space-x-1"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Nouveau Département</span>
+              <span>Nouvelle famille</span>
             </button>
           </div>
 
@@ -147,7 +147,7 @@ export const RHDepartmentManagement: React.FC = () => {
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
             <input
               type="text"
-              placeholder="Rechercher par nom ou code de département (ex: BTP, DEP-BTP)..."
+              placeholder="Rechercher par nom ou code de famille (ex: BTP, DEP-BTP)..."
               value={deptSearch}
               onChange={e => setDeptSearch(e.target.value)}
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:ring-2 focus:ring-emerald-500 transition-all font-medium"
@@ -165,7 +165,7 @@ export const RHDepartmentManagement: React.FC = () => {
           <div className="space-y-3">
             {filteredDirections.length === 0 ? (
               <div className="p-6 text-center text-xs text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
-                Aucun département ne correspond au code ou nom "{deptSearch}".
+                Aucun famille ne correspond au code ou nom "{deptSearch}".
               </div>
             ) : (
               filteredDirections.map(d => (
@@ -249,17 +249,17 @@ export const RHDepartmentManagement: React.FC = () => {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-slate-900 text-sm">Ajouter un Nouveau Département</h3>
+              <h3 className="font-bold text-slate-900 text-sm">Ajouter un Nouvelle famille</h3>
               <button onClick={() => setShowAddDirModal(false)} className="p-1 hover:bg-slate-100 rounded">
                 <X className="w-4 h-4 text-slate-400" />
               </button>
             </div>
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nom du Département</label>
+                <label className="block font-semibold text-slate-700 mb-1">Nom de la famille</label>
                 <input
                   type="text"
-                  placeholder="ex: Département BTP & Infrastructure..."
+                  placeholder="ex: Famille BTP & Infrastructure..."
                   value={dirForm.name}
                   onChange={e => setDirForm({ ...dirForm, name: e.target.value })}
                   className="w-full p-2 border border-slate-300 rounded-lg"
@@ -287,7 +287,7 @@ export const RHDepartmentManagement: React.FC = () => {
                 onClick={handleCreateDirection}
                 className="px-4 py-1.5 bg-emerald-800 text-white font-bold text-xs rounded-lg hover:bg-emerald-900"
               >
-                Créer le Département
+                Créer la famille
               </button>
             </div>
           </div>
@@ -346,4 +346,5 @@ export const RHDepartmentManagement: React.FC = () => {
     </div>
   );
 };
+
 

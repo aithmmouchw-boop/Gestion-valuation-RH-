@@ -69,7 +69,11 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
   const validatedEvals = evaluations.filter(e => e.status === 'valide' || e.status === 'validee');
 
   const handleValidate = async (id: number) => {
-    if (confirm('Valider définitivement cette évaluation annuelle ?')) {
+    const evaluation = evaluations.find(item => item.id === id);
+    const confirmationMessage = evaluation?.status === 'signee'
+      ? 'Valider définitivement cette évaluation annuelle ?'
+      : "Valider le contenu de cette évaluation et la transmettre au collaborateur pour signature ?";
+    if (confirm(confirmationMessage)) {
       await apiClient.validateEvaluationByDG(id);
       loadPendingEvaluations();
     }
@@ -143,7 +147,7 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-1">
-          <div className="text-xs font-bold text-slate-500 uppercase">Validés Définitivement</div>
+          <div className="text-xs font-bold text-slate-500 uppercase">Validés définitivement</div>
           <div className="text-3xl font-black text-emerald-800">{validatedEvals.length} <span className="text-xs font-normal text-slate-400">dossier(s)</span></div>
         </div>
 
@@ -159,13 +163,13 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
           onClick={() => selectDgTab('pending')}
           className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'pending' ? 'bg-purple-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
         >
-          1. File d'Attente Validation ({pendingEvals.length})
+          1. File d'attente DG ({pendingEvals.length})
         </button>
         <button
           onClick={() => selectDgTab('validated')}
           className={`flex-1 py-2.5 rounded-lg transition-all ${activeTab === 'validated' ? 'bg-emerald-800 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
         >
-          2. Évaluations Validées ({validatedEvals.length})
+          2. Évaluations validées ({validatedEvals.length})
         </button>
       </div>
 
@@ -173,7 +177,7 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
         /* Pending Validation List */
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden space-y-0">
           <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-900 flex justify-between items-center">
-            <span>Dossiers soumis à la DG ({pendingEvals.length})</span>
+            <span>Dossiers soumis à la Direction Générale ({pendingEvals.length})</span>
             <span className="text-[10px] text-slate-500 font-normal">Action requise</span>
           </div>
 
@@ -232,7 +236,7 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
                         className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow flex items-center space-x-1.5"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>Valider</span>
+                        <span>{ev.status === 'signee' ? 'Valider définitivement' : 'Valider le contenu'}</span>
                       </button>
                     </div>
                   </div>
@@ -247,7 +251,7 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
           <div className="p-4 bg-emerald-50 border-b border-emerald-200 font-bold text-xs text-emerald-900 flex justify-between items-center">
             <span className="flex items-center space-x-2">
               <ShieldCheck className="w-4 h-4 text-emerald-700" />
-              <span>Dossiers validés par la Direction Générale ({validatedEvals.length})</span>
+              <span>Dossiers définitivement validés ({validatedEvals.length})</span>
             </span>
             <span className="text-[10px] text-emerald-700 font-bold uppercase">Archivé Definitif</span>
           </div>

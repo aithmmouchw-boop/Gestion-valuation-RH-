@@ -29,7 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, activeTab, onSelectTab, 
         }`}
       >
         <BarChart3 className="w-4 h-4 text-emerald-400" />
-        <span>1. Dashboard Global</span>
+        <span>1. Tableau de bord global</span>
       </button>
 
       <button
@@ -65,30 +65,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, activeTab, onSelectTab, 
         <span>4. Collaborateurs</span>
       </button>
 
-      <div className="px-3 py-2 mt-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-        Analytiques & Stratégie
-      </div>
-
-      <button
-        onClick={() => onSelectTab('performance')}
-        className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-          activeTab === 'performance' ? 'bg-emerald-900 text-white shadow-md' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-        }`}
-      >
-        <TrendingUp className="w-4 h-4 text-emerald-400" />
-        <span>5. Performance Groupe</span>
-      </button>
-
-      <button
-        onClick={() => onSelectTab('history_drilldown')}
-        className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-          activeTab === 'history_drilldown' ? 'bg-emerald-900 text-white shadow-md' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-        }`}
-      >
-        <Clock className="w-4 h-4 text-emerald-400" />
-        <span>6. Historique (Drill-down)</span>
-      </button>
-
       <button
         onClick={() => onSelectTab('notifications_config')}
         className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
@@ -96,7 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, activeTab, onSelectTab, 
         }`}
       >
         <Settings className="w-4 h-4 text-emerald-400" />
-        <span>7. Config Notifications</span>
+        <span>5. Config Notifications</span>
       </button>
 
       <div className="px-3 py-2 mt-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
@@ -110,7 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, activeTab, onSelectTab, 
         }`}
       >
         <Users className="w-4 h-4 text-amber-400" />
-        <span>8. Gestion Utilisateurs</span>
+        <span>6. Gestion Utilisateurs</span>
       </button>
 
       <button
@@ -120,7 +96,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, activeTab, onSelectTab, 
         }`}
       >
         <ShieldCheck className="w-4 h-4 text-amber-400" />
-        <span>9. Gestion Départements</span>
+        <span>9. Gestion Familles</span>
       </button>
     </>
   );

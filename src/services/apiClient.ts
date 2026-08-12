@@ -261,10 +261,10 @@ export const apiClient = {
     });
   },
 
-  scheduleInterview: async (id: number, interviewDate: string, message: string) => {
+  scheduleInterview: async (id: number, interviewDate: string, message: string, interviewStatus = 'planifie', followupDate = '', followupComment = '') => {
     return fetchApi(`/api/evaluations/${id}/interview`, {
       method: 'POST',
-      body: JSON.stringify({ interview_date: interviewDate, message })
+      body: JSON.stringify({ interview_date: interviewDate, message, interview_status: interviewStatus, interview_followup_date: followupDate, interview_followup_comment: followupComment })
     });
   },
 

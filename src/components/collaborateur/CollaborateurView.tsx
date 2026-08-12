@@ -1,8 +1,9 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { User, Evaluation, Campagne } from '../../types';
 import { apiClient } from '../../services/apiClient';
-import { exportToPDF } from '../../utils/exportUtils';
+import { exportDossierEvaluationPDF } from '../../utils/exportUtils';
 import { Send, CheckCircle2, Clock, Check, Download, Lock } from 'lucide-react';
+import { CollaboratorDetailDossier } from '../manager/CollaboratorDetailDossier';
 
 interface CollaborateurViewProps {
   currentUser: User;
@@ -28,6 +29,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [activeCampaign, setActiveCampaign] = useState<Campagne | null>(null);
   const [historyEvaluations, setHistoryEvaluations] = useState<Evaluation[]>([]);
+  const [selectedHistoryEvaluationId, setSelectedHistoryEvaluationId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'auto_eval' | 'manager_eval' | 'history'>(
     initialTab === 'my_history' ? 'history' : 'auto_eval'
@@ -63,10 +65,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
       setHistoryEvaluations(evalRes.filter(review =>
         review.score_global > 0 && (review.status === 'valide' || review.status === 'soumis_dg' || review.status === 'signee'),
       ));
-      const openCamp = campRes.find((campaign: Campagne) =>
-        campaign.status === 'ouverte' &&
-        evalRes.some(review => review.campagne_id === campaign.id),
-      );
+      const openCamp = campRes.find((campaign: Campagne) => campaign.status === 'ouverte');
       const currentEvaluation = openCamp
         ? evalRes.find(review => review.campagne_id === openCamp.id)
         : evalRes[0];
@@ -95,8 +94,12 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
   const handleSubmitAutoEval = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submittingAutoEval || isSubmitted) return;
-    if (!evaluation || !activeCampaign || activeCampaign.status !== 'ouverte' || evaluation.campagne_id !== activeCampaign.id) {
+    if (!activeCampaign || activeCampaign.status !== 'ouverte') {
       alert('La campagne doit être lancée par la DRH avant de pouvoir remplir cette auto-évaluation.');
+      return;
+    }
+    if (!evaluation || evaluation.campagne_id !== activeCampaign.id) {
+      alert("Votre dossier d'évaluation n'est pas encore associé à cette campagne. Contactez la DRH.");
       return;
     }
     if (evaluation.competences.some(competence => !ratings[String(competence.id)])) {
@@ -127,6 +130,10 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
 
   const handleSign = async () => {
     if (!evaluation) return;
+    if (!['dg_validee', 'correction_a_confirmer'].includes(evaluation.status)) {
+      alert("Votre évaluation n'est pas encore disponible pour signature.");
+      return;
+    }
     const res = await apiClient.signEvaluation(evaluation.id);
     setEvaluation(res.evaluation);
     alert(evaluation.status === 'correction_a_confirmer'
@@ -145,8 +152,65 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
     }
   };
 
+  const exportCollaboratorDossier = (item: Evaluation) => {
+    const headers = ['Axe', 'Question / compétence', 'Commentaire', 'Note'];
+    const rows = item.competences.map(competence => {
+      const axis = normalizeAxis(competence.axe);
+      const axisLabel = axis === 'savoir'
+        ? 'Savoir'
+        : axis === 'savoir_faire'
+          ? 'Savoir-faire'
+          : axis === 'savoir_etre'
+            ? 'Savoir-être'
+            : 'Autres critères';
+      return [
+        axisLabel,
+        competence.description ? `${competence.name}\n${competence.description}` : competence.name,
+        competence.comment || '-',
+        competence.score ? `${competence.score}/100` : '-',
+      ];
+    });
+    rows.push(
+      ['Synthèse', 'Points forts', item.synthesis_points_forts || '-', '-'],
+      ['Synthèse', 'Points à améliorer', item.synthesis_points_ameliorer || '-', '-'],
+      ['Synthèse', 'Développement à envisager', item.synthesis_developpement || '-', '-'],
+      ['Synthèse', 'Demande de mobilité', item.mobility_request || '-', '-'],
+      ['Synthèse', 'Appréciation globale du manager', item.summary_comment || '-', '-'],
+    );
+
+    const managerStatus = item.score_global > 0 ? 'Validé par le manager' : 'Non validé';
+    const collaboratorStatus = item.signed_at_user ? `Signé le ${item.signed_at_user}` : 'Non signé';
+    const dgStatus = item.validated_at_dg ? `Validé le ${item.validated_at_dg}` : 'Non validé';
+
+    const validations = [
+      { role: 'Collaborateur', name: item.user_name, status: collaboratorStatus, comment: 'Validation et prise de connaissance' },
+      { role: 'Manager évaluateur', name: item.manager_name, status: managerStatus, comment: 'Évaluation réalisée par le manager' },
+      { role: 'Direction Générale', name: 'Direction Générale', status: dgStatus, comment: item.dg_comment || 'Validation du dossier' },
+    ];
+
+    exportDossierEvaluationPDF(
+      `Fiche d'évaluation complète - ${item.user_name}`,
+      headers,
+      rows,
+      validations,
+      `dossier_${item.user_name}`
+    );
+  };
+
   if (loading) {
     return <div className="p-8 text-center text-slate-500">Chargement de votre dossier...</div>;
+  }
+
+  if (selectedHistoryEvaluationId) {
+    return (
+      <CollaboratorDetailDossier
+        evaluationId={selectedHistoryEvaluationId}
+        readOnly
+        readOnlyContext="rh"
+        showGuidelines={false}
+        onBack={() => setSelectedHistoryEvaluationId(null)}
+      />
+    );
   }
 
   const isCampaignOpen = activeCampaign && activeCampaign.status === 'ouverte';
@@ -225,7 +289,19 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
             )}
           </div>
 
-          {!isCampaignOpen ? (
+          {isSubmitted ? (
+            <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-8 text-center space-y-4 shadow-xs">
+              <div className="w-14 h-14 bg-emerald-100 text-emerald-800 rounded-full flex items-center justify-center mx-auto font-black">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Auto-évaluation transmise</h3>
+                <p className="text-sm text-slate-600 mt-2 max-w-xl mx-auto">
+                  Votre auto-évaluation a été envoyée à votre manager. Vous ne pouvez plus la modifier pendant cette campagne.
+                </p>
+              </div>
+            </div>
+          ) : !isCampaignOpen ? (
             /* Banner when DRH has NOT launched a campaign yet */
             <div className="bg-amber-50/90 border-2 border-amber-200 rounded-2xl p-8 text-center space-y-4 shadow-xs">
               <div className="w-14 h-14 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center mx-auto font-black">
@@ -244,6 +320,20 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                     <span>En attente du lancement DRH</span>
                   </span>
                 </div>
+              </div>
+            </div>
+          ) : !evaluation || evaluation.campagne_id !== activeCampaign.id ? (
+            <div className="bg-blue-50/90 border-2 border-blue-200 rounded-2xl p-8 text-center space-y-4 shadow-xs">
+              <div className="w-14 h-14 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center mx-auto font-black">
+                <Clock className="w-7 h-7 text-blue-700" />
+              </div>
+              <div className="max-w-lg mx-auto space-y-2">
+                <h3 className="font-black text-base text-blue-950">
+                  Campagne ouverte, dossier en attente d'affectation
+                </h3>
+                <p className="text-xs text-blue-900 leading-relaxed font-medium">
+                  La campagne {activeCampaign.name} est lancée, mais votre dossier d'évaluation n'est pas encore associé à cette campagne. Contactez la DRH pour activer votre formulaire.
+                </p>
               </div>
             </div>
           ) : (
@@ -381,27 +471,6 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
               <p className="text-xs text-slate-500">Manager: {evaluation.manager_name}</p>
             </div>
 
-            <div className="text-right">
-              <div className="text-[10px] text-slate-400 uppercase font-bold">Score Global Réalisé</div>
-              <div className="text-2xl font-black text-emerald-800">{evaluation.score_global} / 100</div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div className="p-4 bg-slate-50 rounded-xl border">
-              <div className="font-bold text-slate-500">Savoir (20%)</div>
-              <div className="text-xl font-black text-slate-900 mt-1">{evaluation.score_savoir} / 100</div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border">
-              <div className="font-bold text-slate-500">Savoir-faire (50%)</div>
-              <div className="text-xl font-black text-slate-900 mt-1">{evaluation.score_savoir_faire} / 100</div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border">
-              <div className="font-bold text-slate-500">Savoir-être (30%)</div>
-              <div className="text-xl font-black text-slate-900 mt-1">{evaluation.score_savoir_etre} / 100</div>
-            </div>
           </div>
 
           <div className="p-4 bg-slate-50 rounded-xl border space-y-2 text-xs">
@@ -423,7 +492,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                   </div>
                   <div className="divide-y divide-slate-100">
                     {axisItems.map(competence => (
-                      <div key={competence.id} className="grid grid-cols-1 md:grid-cols-[1fr_90px] gap-3 p-4 text-xs">
+                      <div key={competence.id} className="grid grid-cols-1 md:grid-cols-[1fr_110px] gap-3 p-4 text-xs">
                         <div>
                           <div className="font-bold text-slate-900">{competence.name}</div>
                           {competence.description && <div className="mt-0.5 text-[11px] text-slate-500">{competence.description}</div>}
@@ -431,9 +500,11 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                             {competence.comment || 'Aucun commentaire manager renseigné.'}
                           </div>
                         </div>
-                        <div className="md:text-right">
-                          <div className="text-[10px] uppercase font-bold text-slate-400">Note</div>
-                          <div className="text-lg font-black text-slate-900">{competence.score || 0}%</div>
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center self-start">
+                          <div className="text-[10px] font-bold uppercase text-emerald-800">Note</div>
+                          <div className="mt-1 text-lg font-black text-emerald-900">
+                            {competence.score ? `${competence.score}/100` : '-'}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -471,8 +542,14 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
             </div>
           )}
 
+          {evaluation.status === 'soumis_dg' && (
+            <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-600 font-semibold">
+              Votre dossier est en cours d’analyse par la Direction Générale. La signature sera disponible après validation du contenu.
+            </div>
+          )}
+
           {/* Signature / Prise de Connaissance */}
-          <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
+          {(['dg_validee', 'correction_a_confirmer', 'signee', 'valide', 'validee'] as string[]).includes(evaluation.status) && <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
             <div>
               <div className="font-bold text-xs text-emerald-900">Signature & Prise de Connaissance</div>
               <div className="text-[11px] text-emerald-700 mt-0.5">
@@ -494,7 +571,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                 <span>Signé & Enregistré</span>
               </span>
             )}
-          </div>
+          </div>}
         </div>
       )}
 
@@ -506,19 +583,6 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
               <h2 className="font-bold text-base text-slate-900">Historique de vos Revues & Évaluations Annuelles</h2>
               <p className="text-xs text-slate-500 mt-0.5">Consultez et téléchargez vos archives de performance au sein du Groupe Premium.</p>
             </div>
-            {historyEvaluations.length > 0 && (
-              <button
-                onClick={() => {
-                  const headers = ['Campagne', 'Manager', 'Savoir (20%)', 'Savoir-Faire (50%)', 'Savoir-Être (30%)', 'Note Globale', 'Statut'];
-                  const rows = historyEvaluations.map(item => [item.campagne_name, item.manager_name, `${item.score_savoir}/100`, `${item.score_savoir_faire}/100`, `${item.score_savoir_etre}/100`, `${item.score_global}/100`, item.status.toUpperCase()]);
-                  exportToPDF(`Historique_Revues_${currentUser.name}`, headers, rows, 'historique_collaborateur');
-                }}
-                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow flex items-center space-x-1.5"
-              >
-                <Download className="w-4 h-4 text-emerald-400" />
-                <span>Télécharger Relevé PDF</span>
-              </button>
-            )}
           </div>
 
           <div className="divide-y divide-slate-200 border-y border-slate-200">
@@ -543,6 +607,21 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                       {item.score_global} / 100
                     </div>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setSelectedHistoryEvaluationId(item.id)}
+                    className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    Consulter le dossier
+                  </button>
+                  <button
+                    onClick={() => exportCollaboratorDossier(item)}
+                    className="px-3 py-2 rounded-xl bg-slate-900 text-xs font-bold text-white hover:bg-slate-800"
+                  >
+                    Télécharger la fiche complète
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200/60 text-xs text-slate-600">

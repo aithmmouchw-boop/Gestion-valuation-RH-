@@ -133,13 +133,31 @@ export const RHHistoryDrillDown: React.FC = () => {
           rows.push([d.direction_name, m.name, m.poste_name, m.filiale_name]);
         });
       });
-      exportToPDF(`Historique Campagne ${selectedCampaign?.year} — Départements & Managers`, headers, rows, 'historique_departements');
+      exportToPDF(`Historique Campagne ${selectedCampaign?.year} — Familles & Managers`, headers, rows, 'historique_familles');
     } else if (level === 3 && selectedManager) {
       const collabList = getCollaboratorsForSelectedManager();
-      const headers = ['Collaborateur', 'Poste', 'Filiale', 'Statut', 'Score Global'];
+      const headers = [
+        'Collaborateur',
+        'Poste',
+        'Filiale',
+        'Statut',
+        'Score Global',
+        'Points forts',
+        'Points à améliorer',
+        'Développement à envisager',
+      ];
       const rows = collabList.map(c => {
         const ev = getEvaluationForUserInCampaign(c.id);
-        return [c.name, c.poste_name, c.filiale_name, ev?.status || 'En attente', ev?.score_global ? `${ev.score_global}/100` : '-'];
+        return [
+          c.name,
+          c.poste_name,
+          c.filiale_name,
+          ev?.status || 'En attente',
+          ev?.score_global ? `${ev.score_global}/100` : '-',
+          ev?.synthesis_points_forts || '-',
+          ev?.synthesis_points_ameliorer || '-',
+          ev?.synthesis_developpement || '-',
+        ];
       });
       exportToPDF(`Équipe Manager ${selectedManager.name} — ${selectedCampaign?.year}`, headers, rows, 'historique_manager');
     }
@@ -152,10 +170,28 @@ export const RHHistoryDrillDown: React.FC = () => {
       exportToExcel('Historique Campagnes', headers, rows, 'historique_campagnes');
     } else if (level === 3 && selectedManager) {
       const collabList = getCollaboratorsForSelectedManager();
-      const headers = ['Collaborateur', 'Poste', 'Filiale', 'Statut', 'Score Global'];
+      const headers = [
+        'Collaborateur',
+        'Poste',
+        'Filiale',
+        'Statut',
+        'Score Global',
+        'Points forts',
+        'Points à améliorer',
+        'Développement à envisager',
+      ];
       const rows = collabList.map(c => {
         const ev = getEvaluationForUserInCampaign(c.id);
-        return [c.name, c.poste_name, c.filiale_name, ev?.status || 'En attente', ev?.score_global ? `${ev.score_global}/100` : '-'];
+        return [
+          c.name,
+          c.poste_name,
+          c.filiale_name,
+          ev?.status || 'En attente',
+          ev?.score_global ? `${ev.score_global}/100` : '-',
+          ev?.synthesis_points_forts || '-',
+          ev?.synthesis_points_ameliorer || '-',
+          ev?.synthesis_developpement || '-',
+        ];
       });
       exportToExcel(`Manager ${selectedManager.name}`, headers, rows, 'historique_manager');
     }
@@ -336,7 +372,7 @@ export const RHHistoryDrillDown: React.FC = () => {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-900 flex items-center space-x-2">
               <Building2 className="w-5 h-5 text-emerald-800" />
-              <span>Départements & Managers — Campagne {selectedCampaign.year}</span>
+              <span>Familles & Managers — Campagne {selectedCampaign.year}</span>
             </h2>
             <button
               onClick={handleGoToLevel1}
@@ -412,7 +448,7 @@ export const RHHistoryDrillDown: React.FC = () => {
               className="text-xs text-slate-600 hover:text-slate-900 flex items-center space-x-1 font-semibold"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Retour à la liste des départements</span>
+              <span>Retour à la liste des familles</span>
             </button>
           </div>
 
@@ -488,7 +524,7 @@ export const RHHistoryDrillDown: React.FC = () => {
                             className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white transition-colors hover:bg-emerald-800"
                           >
                             <Eye className="h-3.5 w-3.5" />
-                            Voir l'évaluation
+                            Voir le dossier
                           </button>
                         )}
                       </td>
@@ -503,4 +539,5 @@ export const RHHistoryDrillDown: React.FC = () => {
     </div>
   );
 };
+
 

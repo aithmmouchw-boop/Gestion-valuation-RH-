@@ -1,10 +1,11 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { User, UserRole, Direction, Filiale, Poste } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
 import { 
   Users, UserPlus, Search, Filter, Trash2, Edit3, 
-  Download, FileSpreadsheet, X, Mail 
+  Download, FileSpreadsheet, X, Mail, Upload 
 } from 'lucide-react';
 import { UserInitials } from '../UserInitials';
 
@@ -29,6 +30,8 @@ export const RHUserManagement: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [creatingUser, setCreatingUser] = useState(false);
+  const [importingUsers, setImportingUsers] = useState(false);
+  const importInputRef = React.useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -63,7 +66,142 @@ export const RHUserManagement: React.FC = () => {
     loadData();
   }, []);
 
-  const getManagersForAssignment = (directionName?: string, filialeName?: string) => users.filter(user => {
+  const normalizeHeader = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  const getCell = (row: Record<string, unknown>, names: string[]) => {
+    const entry = Object.entries(row).find(([key]) => names.includes(normalizeHeader(key)));
+    return entry ? String(entry[1] ?? '').trim() : '';
+  };
+
+  const slugify = (value: string) => value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/^\.|\.$/g, '');
+
+  const buildGeneratedEmail = (name: string, matricule: string) => {
+    const base = slugify(matricule || name || `user.${Date.now()}`) || `user.${Date.now()}`;
+    return `${base}@groupe-premium.test`;
+  };
+
+  const handleImportUsers = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      alert('Le fichier doit être au format Excel .xlsx ou .xls.');
+      event.target.value = '';
+      return;
+    }
+    setImportingUsers(true);
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellFormula: false, cellHTML: false });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '', raw: false });
+      if (rows.length === 0) throw new Error('Le fichier Excel ne contient aucun utilisateur.');
+
+      const errors: string[] = [];
+      const imported: string[] = [];
+      const createdManagers = new Map<string, User>();
+      let localUsers = [...users];
+      let localDirections = [...directions];
+      let localFiliales = [...filiales];
+      const defaultFamilyName = 'Famille non affectée';
+
+      const ensureDirection = async (name: string) => {
+        const directionName = name || defaultFamilyName;
+        const existing = localDirections.find(direction => direction.name.toLowerCase() === directionName.toLowerCase());
+        if (existing) return existing.name;
+        const created = await apiClient.createDirection({ name: directionName, code: slugify(directionName).slice(0, 12).toUpperCase() || 'FAM' });
+        localDirections = [...localDirections, created];
+        return created.name;
+      };
+
+      const ensureFiliale = async (name: string) => {
+        const filialeName = name || 'Siège non affecté';
+        const existing = localFiliales.find(filiale => filiale.name.toLowerCase() === filialeName.toLowerCase());
+        if (existing) return existing.name;
+        const created = await apiClient.createFiliale({ name: filialeName, city: filialeName });
+        localFiliales = [...localFiliales, created];
+        return created.name;
+      };
+
+      const ensureManager = async (responsableName: string, filialeName: string, directionName: string) => {
+        const managerName = responsableName.trim();
+        if (!managerName) return undefined;
+        const key = managerName.toLowerCase();
+        if (createdManagers.has(key)) return createdManagers.get(key);
+        const existing = localUsers.find(user => user.role === 'manager' && user.name.toLowerCase() === key);
+        if (existing) {
+          createdManagers.set(key, existing);
+          return existing;
+        }
+        const response = await apiClient.createUser({
+          name: managerName,
+          email: buildGeneratedEmail(managerName, `manager.${managerName}`),
+          role: 'manager',
+          direction_name: directionName,
+          filiale_name: filialeName,
+          poste_name: 'Manager',
+          category: 'Cadre',
+        });
+        localUsers = [...localUsers, response.user];
+        createdManagers.set(key, response.user);
+        return response.user;
+      };
+
+      for (const [index, row] of rows.entries()) {
+        const name = getCell(row, ['nomprenom', 'nomcomplet', 'name', 'nom']);
+        const matricule = getCell(row, ['matricule', 'codepersonnel', 'code']);
+        const poste_name = getCell(row, ['poste', 'fonction']) || 'Poste non renseigné';
+        const societe = getCell(row, ['societe', 'société', 'filiale', 'site']);
+        const responsable = getCell(row, ['responsable', 'managerreferent', 'manager']);
+        const email = getCell(row, ['email', 'adressemail', 'adresseemailprofessionnelle']) || buildGeneratedEmail(name, matricule);
+        const roleRaw = getCell(row, ['role', 'rôle']).toLowerCase();
+        const role: UserRole = roleRaw.includes('manager') ? 'manager' : roleRaw.includes('dg') || roleRaw.includes('directeur') ? 'dg' : roleRaw.includes('drh') || roleRaw.includes('dev') || roleRaw.includes('rh') ? 'rh' : 'collaborateur';
+        const directionName = await ensureDirection(getCell(row, ['famille', 'direction', 'departement']) || defaultFamilyName);
+        const filialeName = await ensureFiliale(societe || 'Siège non affecté');
+        const manager = role === 'collaborateur' ? await ensureManager(responsable, filialeName, directionName) : undefined;
+        const categoryCandidate = (getCell(row, ['categorieprofessionnelle', 'categorie', 'category']) || categoryOptions[role][0]) as User['category'];
+
+        if (!name) {
+          errors.push(`Ligne ${index + 2}: nom obligatoire.`);
+          continue;
+        }
+        if (localUsers.some(user => user.email.toLowerCase() === email.toLowerCase())) {
+          errors.push(`Ligne ${index + 2}: utilisateur déjà existant (${email}).`);
+          continue;
+        }
+        if (role === 'collaborateur' && !manager) {
+          errors.push(`Ligne ${index + 2}: responsable introuvable pour ${name}.`);
+          continue;
+        }
+
+        const response = await apiClient.createUser({
+          name,
+          email,
+          role,
+          direction_name: directionName,
+          filiale_name: filialeName,
+          poste_name,
+          category: categoryOptions[role].includes(categoryCandidate) ? categoryCandidate : categoryOptions[role][0],
+          manager_id: manager?.id,
+          manager_name: manager?.name,
+        });
+        localUsers = [...localUsers, response.user];
+        imported.push(`${name} (${email})`);
+      }
+
+      await loadData();
+      alert(`${imported.length} utilisateur(s) importé(s).${errors.length ? '\n\nLignes non importées :\n' + errors.slice(0, 20).join('\n') : ''}`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "L'import des utilisateurs a échoué.");
+    } finally {
+      setImportingUsers(false);
+      event.target.value = '';
+    }
+  };
+
+  const getManagersForAssignment = (directionName: string, filialeName: string) => users.filter(user => {
     if (user.role !== 'manager') return false;
     if (directionName && user.direction_name !== directionName) return false;
     if (filialeName && user.filiale_name !== filialeName) return false;
@@ -86,13 +224,13 @@ export const RHUserManagement: React.FC = () => {
       return;
     }
     if (formData.role === 'collaborateur' && (!formData.direction_name || !formData.filiale_name || !formData.poste_name || !formData.manager_id)) {
-      alert('Le département, la filiale, le poste et le Manager référent sont obligatoires pour un collaborateur.'); return;
+      alert('Le famille, la filiale, le poste et le Manager référent sont obligatoires pour un collaborateur.'); return;
     }
     if (formData.role === 'manager' && (!formData.direction_name || !formData.filiale_name || !formData.poste_name)) {
-      alert('Le département, la filiale et le poste sont obligatoires pour un Manager.'); return;
+      alert('Le famille, la filiale et le poste sont obligatoires pour un Manager.'); return;
     }
     if (formData.role === 'dg' && !formData.direction_name && !formData.filiale_name) {
-      alert('Sélectionnez le département ou la filiale supervisée par le Directeur Général.'); return;
+      alert('Sélectionnez le famille ou la filiale supervisée par le Directeur Général.'); return;
     }
 
     const selectedManager = managersList.find(m => m.id.toString() === formData.manager_id);
@@ -140,7 +278,7 @@ export const RHUserManagement: React.FC = () => {
   };
 
   const handleExportPDF = () => {
-    const headers = ['Nom & Prénom', 'Email', 'Rôle', 'Poste', 'Département', 'Manager Référent'];
+    const headers = ['Nom & Prénom', 'Email', 'Rôle', 'Poste', 'Famille', 'Manager Référent'];
     const rows = filteredUsers.map(u => [
       u.name,
       u.email,
@@ -153,7 +291,7 @@ export const RHUserManagement: React.FC = () => {
   };
 
   const handleExportExcel = () => {
-    const headers = ['Nom & Prénom', 'Email', 'Rôle', 'Poste', 'Département', 'Manager Référent'];
+    const headers = ['Nom & Prénom', 'Email', 'Rôle', 'Poste', 'Famille', 'Manager Référent'];
     const rows = filteredUsers.map(u => [
       u.name,
       u.email,
@@ -175,11 +313,12 @@ export const RHUserManagement: React.FC = () => {
             <span>Gestion des Utilisateurs & Attribution des Rôles</span>
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Administration des comptes, assignation des départements, filiales et affectation des managers référents.
+            Administration des comptes, assignation des familles, filiales et affectation des managers référents.
           </p>
         </div>
 
         <div className="flex items-center space-x-2">
+          <input ref={importInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportUsers} className="hidden" />
           <button onClick={handleExportPDF} className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center space-x-1.5 border border-slate-200">
             <Download className="w-4 h-4 text-emerald-700" />
             <span>PDF</span>
@@ -194,6 +333,14 @@ export const RHUserManagement: React.FC = () => {
           >
             <UserPlus className="w-4 h-4" />
             <span>Nouveau Compte Utilisateur</span>
+          </button>
+          <button
+            onClick={() => importInputRef.current?.click()}
+            disabled={importingUsers}
+            className="px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold text-xs rounded-xl flex items-center space-x-2 border border-emerald-200 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            <span>{importingUsers ? 'Import en cours...' : 'Importer utilisateurs'}</span>
           </button>
         </div>
       </div>
@@ -229,13 +376,13 @@ export const RHUserManagement: React.FC = () => {
           </div>
 
           <div className="flex items-center space-x-1.5">
-            <span className="font-semibold text-slate-600">Département:</span>
+            <span className="font-semibold text-slate-600">Famille:</span>
             <select
               value={directionFilter}
               onChange={e => setDirectionFilter(e.target.value)}
               className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-medium"
             >
-              <option value="all">Tous les départements</option>
+              <option value="all">Toutes les familles</option>
               {directions.map(d => (
                 <option key={d.id} value={d.name}>{d.name}</option>
               ))}
@@ -253,7 +400,7 @@ export const RHUserManagement: React.FC = () => {
                 <th className="p-4 pl-6">Utilisateur</th>
                 <th className="p-4">Rôle</th>
                 <th className="p-4">Poste & Catégorie</th>
-                <th className="p-4">Département</th>
+                <th className="p-4">Famille</th>
                 <th className="p-4">Manager Référent</th>
                 <th className="p-4 text-right pr-6">Actions</th>
               </tr>
@@ -404,7 +551,7 @@ export const RHUserManagement: React.FC = () => {
 
               {formData.role !== 'rh' && <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Département / Direction {formData.role !== 'dg' && '*'}</label>
+                  <label className="block font-semibold text-slate-700 mb-1">Famille / Direction {formData.role !== 'dg' && '*'}</label>
                   <select
                     value={formData.direction_name}
                     onChange={e => {
@@ -439,7 +586,7 @@ export const RHUserManagement: React.FC = () => {
                 <div><label className="block font-semibold text-slate-700 mb-1">Poste *</label><select
                   value={formData.poste_name}
                   onChange={e => setFormData({ ...formData, poste_name: e.target.value })}
-                  className="w-full p-2 border border-slate-300 rounded-lg"><option value="">Sélectionner un poste...</option>{postes.filter(p => !formData.direction_name || p.direction_id === directions.find(d => d.name === formData.direction_name)?.id).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
+                  className="w-full p-2 border border-slate-300 rounded-lg"><option value="">Sélectionner un poste...</option>{postes.filter(p => !formData.direction_name || p.direction_id === directions.find(d => d.name === formData.direction_name).id).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
               </div>}
 
               <div><label className="block font-semibold text-slate-700 mb-1">Catégorie professionnelle *</label><select value={formData.category} onChange={e => setFormData({...formData,category:e.target.value as User['category']})} className="w-full p-2 border border-slate-300 rounded-lg bg-slate-50">{categoryOptions[formData.role].map(category => <option key={category} value={category}>{category}</option>)}</select></div>
@@ -542,7 +689,7 @@ export const RHUserManagement: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Département / Direction *</label>
+                  <label className="block font-semibold text-slate-700 mb-1">Famille / Direction *</label>
                   <select
                     value={editingUser.direction_name}
                     onChange={e => setEditingUser({ ...editingUser, direction_name: e.target.value, manager_id: undefined })}

@@ -87,6 +87,7 @@ export type EvaluationStatus =
   | 'auto_eval_terminee' 
   | 'en_cours_manager' 
   | 'soumis_dg' 
+  | 'dg_validee'
   | 'valide' 
   | 'signee'
   | 'a_corriger'
@@ -160,11 +161,18 @@ export interface Evaluation {
   manager_name: string;
   interview_date?: string;
   interview_message?: string;
+  interview_status?: 'a_planifier' | 'planifie' | 'realise' | 'reporte' | 'annule';
+  interview_followup_date?: string;
+  interview_followup_comment?: string;
   status: EvaluationStatus;
   score_savoir: number; // calculated 0-100
   score_savoir_faire: number; // calculated 0-100
   score_savoir_etre: number; // calculated 0-100
   score_global: number; // weighted: 20% Savoir + 50% Savoir-faire + 30% Savoir-être
+  synthesis_points_forts?: string;
+  synthesis_points_ameliorer?: string;
+  synthesis_developpement?: string;
+  mobility_request?: string;
   summary_comment?: string;
   signed_at_user?: string;
   validated_at_dg?: string;

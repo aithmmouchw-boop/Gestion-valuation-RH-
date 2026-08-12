@@ -1,8 +1,8 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { DashboardKPIs } from '../../types';
+import { Campagne, DashboardKPIs, Evaluation, User } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
-import { PieChart, Pie, Cell } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { 
   CheckCircle2, Clock, AlertTriangle, Download, FileSpreadsheet, TrendingUp, Layers 
 } from 'lucide-react';
@@ -12,10 +12,22 @@ export const RHDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [relaunchingManager, setRelaunchingManager] = useState<string | null>(null);
   const [relaunchSuccess, setRelaunchSuccess] = useState<string | null>(null);
+  const [campaigns, setCampaigns] = useState<Campagne[]>([]);
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [filters, setFilters] = useState({ campaignId: 'active', filiale: 'all', poste: 'all', year: 'all' });
 
   const loadData = () => {
-    apiClient.getKPIs().then(res => {
+    Promise.all([
+      apiClient.getKPIs(),
+      apiClient.getCampaigns(),
+      apiClient.getEvaluations(),
+      apiClient.getUsers(),
+    ]).then(([res, campaignRes, evaluationRes, userRes]) => {
       setKpis(res);
+      setCampaigns(campaignRes);
+      setEvaluations(evaluationRes);
+      setUsers(userRes);
       setLoading(false);
     }).catch(err => {
       console.error(err);
@@ -69,19 +81,113 @@ export const RHDashboard: React.FC = () => {
     return progress < 100;
   });
 
+  const COLORS = ['#005C3B', '#10B981', '#F59E0B', '#EF4444'];
+
+  const activeCampaign = campaigns.find(campaign => ['ouverte', 'en_cours'].includes(campaign.status));
+  const selectedCampaignId = filters.campaignId === 'active'
+    ? activeCampaign?.id
+    : filters.campaignId === 'all'
+      ? undefined
+      : Number(filters.campaignId);
+  const selectedYear = filters.year === 'all' ? undefined : Number(filters.year);
+  const filteredEvaluations = evaluations.filter(evaluation => {
+    const campaign = campaigns.find(item => item.id === evaluation.campagne_id);
+    if (selectedCampaignId && evaluation.campagne_id !== selectedCampaignId) return false;
+    if (!selectedCampaignId && filters.campaignId === 'active' && activeCampaign && evaluation.campagne_id !== activeCampaign.id) return false;
+    if (selectedYear && campaign?.year !== selectedYear) return false;
+    if (filters.filiale !== 'all' && evaluation.filiale_name !== filters.filiale) return false;
+    if (filters.poste !== 'all' && evaluation.poste_name !== filters.poste) return false;
+    return true;
+  });
+  const finalEvaluations = filteredEvaluations.filter(evaluation => ['valide', 'validee'].includes(evaluation.status) && evaluation.score_global > 0);
+  const selectedCampaignForProgress = selectedCampaignId ? campaigns.find(campaign => campaign.id === selectedCampaignId) : activeCampaign;
+  const getCampaignTimeProgress = (campaign?: Campagne) => {
+    if (!campaign?.start_date || !campaign?.end_date) return kpis.globalProgress;
+    const start = new Date(campaign.start_date);
+    const end = new Date(campaign.end_date);
+    const today = new Date();
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    const duration = Math.max(1, end.getTime() - start.getTime());
+    const elapsed = Math.min(Math.max(today.getTime() - start.getTime(), 0), duration);
+    return Math.round((elapsed / duration) * 100);
+  };
+  const averageBy = (key: 'filiale_name') => {
+    const groups = new Map<string, Evaluation[]>();
+    finalEvaluations.forEach(evaluation => {
+      const label = evaluation[key] || 'Non renseigné';
+      groups.set(label, [...(groups.get(label) || []), evaluation]);
+    });
+    return Array.from(groups.entries()).map(([label, items]) => ({
+      label,
+      value: Math.round(items.reduce((sum, item) => sum + item.score_global, 0) / items.length),
+      evaluated: items.length,
+      total: filteredEvaluations.filter(evaluation => evaluation[key] === label).length || items.length,
+    })).sort((a, b) => b.value - a.value);
+  };
+  const filialePerformanceItems = averageBy('filiale_name').length
+    ? averageBy('filiale_name')
+    : kpis.filialeAverages.map(item => ({
+      label: item.filiale,
+      value: item.average,
+      evaluated: item.evaluated,
+      total: item.total,
+    })).filter(item => item.total > 0 || item.evaluated > 0);
+  const filteredProgress = getCampaignTimeProgress(selectedCampaignForProgress);
+  const pendingOrInProgressCount = filteredEvaluations.length ? filteredEvaluations.length - finalEvaluations.length : kpis.pendingEvaluations;
+  const completedCount = finalEvaluations.length || kpis.completedEvaluations;
+  const totalCount = filteredEvaluations.length || kpis.totalEvaluations;
+  const exportEvaluationBase = finalEvaluations.length ? finalEvaluations : filteredEvaluations.filter(evaluation => evaluation.score_global > 0);
+  const averageScore = (key: 'score_savoir' | 'score_savoir_faire' | 'score_savoir_etre') => {
+    if (!exportEvaluationBase.length) return 0;
+    return Math.round(exportEvaluationBase.reduce((sum, evaluation) => sum + (Number(evaluation[key]) || 0), 0) / exportEvaluationBase.length);
+  };
+  const completionRate = (key: 'synthesis_points_forts' | 'synthesis_points_ameliorer' | 'synthesis_developpement') => {
+    const base = finalEvaluations.length || filteredEvaluations.length || 0;
+    if (!base) return { count: 0, total: 0, percentage: 0 };
+    const source = finalEvaluations.length ? finalEvaluations : filteredEvaluations;
+    const count = source.filter(evaluation => String(evaluation[key] || '').trim().length > 0).length;
+    return { count, total: base, percentage: Math.round((count / base) * 100) };
+  };
+  const buildDashboardExportRows = () => {
+    const pointsForts = completionRate('synthesis_points_forts');
+    const pointsAmeliorer = completionRate('synthesis_points_ameliorer');
+    const developpement = completionRate('synthesis_developpement');
+    const lateEvaluationsCount = delayedManagers.reduce((sum, manager) => sum + manager.late_count, 0);
+    const campaignLabel = selectedCampaignForProgress?.name || (filters.campaignId === 'all' ? 'Toutes les campagnes' : 'Campagne active');
+
+    return [
+      ['Campagne analysée', campaignLabel, 'Selon les filtres sélectionnés'],
+      ['Avancement Global', `${filteredProgress}%`, 'Calculé selon la période de la campagne'],
+      ['Évaluations Réalisées', completedCount, `${completedCount} sur ${totalCount} évaluation(s)`],
+      ['En Attente / En Cours', pendingOrInProgressCount, `${pendingOrInProgressCount} évaluation(s) non finalisée(s)`],
+      ['Retards Managers', delayedManagers.length, `${lateEvaluationsCount} évaluation(s) en retard`],
+      ['Savoir global', `${averageScore('score_savoir')}%`, 'Moyenne globale calculée en arrière-plan'],
+      ['Savoir-faire global', `${averageScore('score_savoir_faire')}%`, 'Moyenne globale calculée en arrière-plan'],
+      ['Savoir-être global', `${averageScore('score_savoir_etre')}%`, 'Moyenne globale calculée en arrière-plan'],
+      ['Points forts renseignés', `${pointsForts.percentage}%`, `${pointsForts.count} dossier(s) sur ${pointsForts.total}`],
+      ['Points à améliorer renseignés', `${pointsAmeliorer.percentage}%`, `${pointsAmeliorer.count} dossier(s) sur ${pointsAmeliorer.total}`],
+      ['Développement à envisager renseigné', `${developpement.percentage}%`, `${developpement.count} dossier(s) sur ${developpement.total}`],
+    ];
+  };
+
   const handleExportPDF = () => {
-    const headers = ['Manager', 'Direction', 'Évaluations en Retard', 'Total à Réaliser'];
-    const rows = delayedManagers.map(m => [m.manager_name, m.direction, m.late_count, m.total_count]);
-    exportToPDF('Indicateurs de Performance & Suivi RH - Groupe Premium', headers, rows, 'kpis_dashboard');
+    const headers = ['Indicateur', 'Valeur', 'Détail'];
+    exportToPDF('Rapport Tableau de bord RH - Groupe Premium', headers, buildDashboardExportRows(), 'rapport_tableau_de_bord_rh');
   };
 
   const handleExportExcel = () => {
-    const headers = ['Manager', 'Direction', 'Évaluations en Retard', 'Total à Réaliser'];
-    const rows = delayedManagers.map(m => [m.manager_name, m.direction, m.late_count, m.total_count]);
-    exportToExcel('KPIs RH', headers, rows, 'kpis_dashboard');
+    const headers = ['Indicateur', 'Valeur', 'Détail'];
+    exportToExcel('Tableau de bord RH', headers, buildDashboardExportRows(), 'rapport_tableau_de_bord_rh');
   };
 
-  const COLORS = ['#005C3B', '#10B981', '#F59E0B', '#EF4444'];
+  const filiales = Array.from(new Set(users.map(user => user.filiale_name).filter(Boolean))).sort();
+  const postes = Array.from(new Set(users.map(user => user.poste_name).filter(Boolean))).sort();
+  const years = campaigns
+    .map(campaign => Number(campaign.year))
+    .filter((year, index, list) => Number.isFinite(year) && list.indexOf(year) === index)
+    .sort((a, b) => b - a);
 
   const renderCircularMetrics = (items: { label: string; value: number; evaluated: number; total: number }[]) => (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -121,6 +227,62 @@ export const RHDashboard: React.FC = () => {
     </div>
   );
 
+  const renderFilialeDonutChart = (items: { label: string; value: number; evaluated: number; total: number }[]) => {
+    const chartData = items.map(item => ({
+      name: item.label,
+      value: Math.max(0, Math.min(100, Number(item.value) || 0)),
+      detail: `${item.evaluated} évaluation(s) notée(s) sur ${item.total}`,
+    }));
+
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-5 items-center">
+        <div className="h-[320px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={chartData}
+                dataKey="value"
+                nameKey="name"
+                cx="50%"
+                cy="50%"
+                innerRadius={70}
+                outerRadius={120}
+                paddingAngle={3}
+                stroke="#ffffff"
+                strokeWidth={2}
+              >
+                {chartData.map((_, index) => (
+                  <Cell key={`filiale-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(value, name, props) => [`${value}%`, `${name} - ${props.payload.detail}`]} />
+              <Legend verticalAlign="bottom" height={36} iconType="circle" />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="space-y-3">
+          {items.map((item, index) => (
+            <div key={item.label} className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                  <span className="text-xs font-bold text-slate-800 truncate">{item.label}</span>
+                </div>
+                <span className="text-sm font-black text-slate-900">{item.value}%</span>
+              </div>
+              <div className="mt-2 h-2 rounded-full bg-slate-200 overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(0, Math.min(100, item.value))}%`, backgroundColor: COLORS[index % COLORS.length] }} />
+              </div>
+              <div className="mt-1 text-[10px] font-medium text-slate-500">
+                {item.evaluated} évaluation(s) notée(s) sur {item.total}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -155,6 +317,38 @@ export const RHDashboard: React.FC = () => {
         </div>
       </div>
 
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200/80 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Campagne</label>
+          <select value={filters.campaignId} onChange={event => setFilters(prev => ({ ...prev, campaignId: event.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-700">
+            <option value="active">Campagne active</option>
+            <option value="all">Toutes les campagnes</option>
+            {campaigns.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Filiale</label>
+          <select value={filters.filiale} onChange={event => setFilters(prev => ({ ...prev, filiale: event.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-700">
+            <option value="all">Toutes les filiales</option>
+            {filiales.map(filiale => <option key={filiale} value={filiale}>{filiale}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Poste</label>
+          <select value={filters.poste} onChange={event => setFilters(prev => ({ ...prev, poste: event.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-700">
+            <option value="all">Tous les postes</option>
+            {postes.map(poste => <option key={poste} value={poste}>{poste}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Année</label>
+          <select value={filters.year} onChange={event => setFilters(prev => ({ ...prev, year: event.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-700">
+            <option value="all">Toutes les années</option>
+            {years.map(year => <option key={year} value={year}>{year}</option>)}
+          </select>
+        </div>
+      </div>
+
       {/* KPI Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm">
@@ -164,9 +358,9 @@ export const RHDashboard: React.FC = () => {
               <TrendingUp className="w-5 h-5" />
             </div>
           </div>
-          <div className="text-3xl font-black text-slate-900 mt-2">{kpis.globalProgress}%</div>
+          <div className="text-3xl font-black text-slate-900 mt-2">{filteredProgress}%</div>
           <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
-            <div className="bg-emerald-600 h-full rounded-full transition-all duration-500" style={{ width: `${kpis.globalProgress}%` }}></div>
+            <div className="bg-emerald-600 h-full rounded-full transition-all duration-500" style={{ width: `${filteredProgress}%` }}></div>
           </div>
           <p className="text-[11px] text-slate-500 mt-2">Objectif de complétion: 100%</p>
         </div>
@@ -178,9 +372,9 @@ export const RHDashboard: React.FC = () => {
               <CheckCircle2 className="w-5 h-5" />
             </div>
           </div>
-          <div className="text-3xl font-black text-slate-900 mt-2">{kpis.completedEvaluations} <span className="text-xs font-normal text-slate-500">/ {kpis.totalEvaluations}</span></div>
+          <div className="text-3xl font-black text-slate-900 mt-2">{finalEvaluations.length || kpis.completedEvaluations} <span className="text-xs font-normal text-slate-500">/ {filteredEvaluations.length || kpis.totalEvaluations}</span></div>
           <p className="text-[11px] text-emerald-700 font-semibold mt-3">
-            {kpis.validatedEvaluations} validées par la Direction Générale
+            {finalEvaluations.length || kpis.validatedEvaluations} validées définitivement
           </p>
         </div>
 
@@ -191,7 +385,7 @@ export const RHDashboard: React.FC = () => {
               <Clock className="w-5 h-5" />
             </div>
           </div>
-          <div className="text-3xl font-black text-slate-900 mt-2">{kpis.pendingEvaluations}</div>
+          <div className="text-3xl font-black text-slate-900 mt-2">{filteredEvaluations.length ? filteredEvaluations.length - finalEvaluations.length : kpis.pendingEvaluations}</div>
           <p className="text-[11px] text-amber-700 font-medium mt-3">
             Relances automatiques activées
           </p>
@@ -234,33 +428,13 @@ export const RHDashboard: React.FC = () => {
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Real averages by professional family */}
+      <div className="grid grid-cols-1 gap-6">
         <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
           <h3 className="font-bold text-sm text-slate-900 mb-4 flex items-center justify-between">
-            <span>Performance réelle par Famille Métier</span>
-            <span className="text-xs text-slate-400 font-normal">Moyenne des évaluations notées</span>
+            <span>Répartition des performances par filiale</span>
+            <span className="text-xs text-slate-400 font-normal">Filtrée par campagne, poste, filiale et année</span>
           </h3>
-          {renderCircularMetrics(kpis.familyAverages.map(item => ({
-            label: item.family,
-            value: item.average,
-            evaluated: item.evaluated,
-            total: item.total,
-          })))}
-        </div>
-
-        {/* Real averages by job function */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
-          <h3 className="font-bold text-sm text-slate-900 mb-4 flex items-center justify-between">
-            <span>Performance réelle par Fonction</span>
-            <span className="text-xs text-slate-400 font-normal">Postes et fonctions des collaborateurs</span>
-          </h3>
-          {renderCircularMetrics(kpis.functionAverages.map(item => ({
-            label: item.function,
-            value: item.average,
-            evaluated: item.evaluated,
-            total: item.total,
-          })))}
+          {filialePerformanceItems.length ? renderFilialeDonutChart(filialePerformanceItems) : <p className="text-xs text-slate-500">Aucune donnée de performance disponible pour les filtres sélectionnés.</p>}
         </div>
       </div>
 

@@ -54,7 +54,7 @@ Artisan::command('evaluations:repair-competence-ids', function () {
 
         foreach ($competences as $index => &$competence) {
             $template = $templates->get(($competence['axe'] ?? '').'|'.($competence['name'] ?? ''));
-            $id = $template?->id ?? (1000000000 + ((int) $row->id * 1000) + $index);
+            $id = $template->id ?? (1000000000 + ((int) $row->id * 1000) + $index);
             $competence['id'] = (int) $id;
             $competence['competence_id'] = $template ? (int) $template->id : null;
         }

@@ -1,7 +1,8 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Campagne, CampagneStatus, User } from '../../types';
+import { Campagne, CampagneStatus, Evaluation, User } from '../../types';
 import { apiClient } from '../../services/apiClient';
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
+import { CollaboratorDetailDossier } from '../manager/CollaboratorDetailDossier';
 import { 
   Plus, Search, Filter, Play, CheckCircle, Archive, 
   Eye, Edit3, Calendar, AlertCircle, Download, FileSpreadsheet, X, Bell, Trash2
@@ -15,6 +16,9 @@ export const RHCampaigns: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [platformUsers, setPlatformUsers] = useState<User[]>([]);
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [selectedManagerForCampaign, setSelectedManagerForCampaign] = useState<string | null>(null);
+  const [selectedEvaluationId, setSelectedEvaluationId] = useState<number | null>(null);
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
@@ -57,6 +61,7 @@ export const RHCampaigns: React.FC = () => {
   useEffect(() => {
     loadCampaigns();
     apiClient.getUsers().then(setPlatformUsers).catch(() => setPlatformUsers([]));
+    apiClient.getEvaluations().then(setEvaluations).catch(() => setEvaluations([]));
   }, []);
 
   const managers = platformUsers.filter(user => user.role === 'manager');
@@ -215,6 +220,30 @@ export const RHCampaigns: React.FC = () => {
     exportToExcel('Campagnes', headers, rows, 'campagnes_rh');
   };
 
+  const getCampaignEvaluations = (campaignId: number) => evaluations.filter(evaluation => evaluation.campagne_id === campaignId);
+
+  const exportCampaignDetails = (campaign: Campagne, format: 'pdf' | 'excel') => {
+    const headers = ['Collaborateur', 'Poste', 'Filiale', 'Famille', 'Manager', 'Statut', 'Points forts', 'Points à améliorer', 'Développement', 'Mobilité', 'Appréciation globale'];
+    const rows = getCampaignEvaluations(campaign.id).map(evaluation => [
+      evaluation.user_name,
+      evaluation.poste_name,
+      evaluation.filiale_name,
+      evaluation.direction_name,
+      evaluation.manager_name,
+      evaluation.status,
+      evaluation.synthesis_points_forts || '-',
+      evaluation.synthesis_points_ameliorer || '-',
+      evaluation.synthesis_developpement || '-',
+      evaluation.mobility_request || '-',
+      evaluation.summary_comment || '-',
+    ]);
+    if (format === 'pdf') {
+      exportToPDF(`Dossier campagne - ${campaign.name}`, headers, rows, `campagne_${campaign.id}`);
+    } else {
+      exportToExcel(`Dossier campagne - ${campaign.name}`, headers, rows, `campagne_${campaign.id}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -311,19 +340,20 @@ export const RHCampaigns: React.FC = () => {
                 <th className="p-4">Statut</th>
                 <th className="p-4">Collaborateurs</th>
                 <th className="p-4">Progression</th>
+                <th className="p-4">Voir les détails</th>
                 <th className="p-4 text-right pr-6">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-500">
+                  <td colSpan={8} className="p-8 text-center text-slate-500">
                     Chargement des campagnes...
                   </td>
                 </tr>
               ) : filteredCampaigns.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-500">
+                  <td colSpan={8} className="p-8 text-center text-slate-500">
                     Aucune campagne trouvée.
                   </td>
                 </tr>
@@ -351,16 +381,20 @@ export const RHCampaigns: React.FC = () => {
                         <span className="font-bold text-slate-800">{c.progress}%</span>
                       </div>
                     </td>
+                    <td className="p-4">
+                      <button
+                        onClick={() => {
+                          setSelectedCampaignForView(c);
+                          setSelectedManagerForCampaign(null);
+                          setSelectedEvaluationId(null);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-800 text-white font-bold text-[11px]"
+                      >
+                        Voir les détails
+                      </button>
+                    </td>
                     <td className="p-4 text-right pr-6">
                       <div className="flex items-center justify-end space-x-1">
-                        <button
-                          onClick={() => setSelectedCampaignForView(c)}
-                          className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors"
-                          title="Consulter les détails"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-
                         <button
                           onClick={() => setEditingCampaign({ ...c })}
                           className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
@@ -686,7 +720,7 @@ export const RHCampaigns: React.FC = () => {
                     <div><strong>Filiales :</strong> {formData.filiales.join(', ')}</div>
                     <div><strong>Description :</strong> {formData.description}</div>
                     <div><strong>Population :</strong> {collaborators.length} collaborateurs et {managers.length} managers</div>
-                    <div><strong>Départements informés :</strong> {departments.join(', ') || 'Aucun département'}</div>
+                    <div><strong>Familles informées :</strong> {departments.join(', ') || 'Aucune famille'}</div>
                   </div>
 
                   <div className="bg-amber-50/60 p-4 rounded-xl border border-amber-200 space-y-1.5 text-slate-900">
@@ -864,72 +898,132 @@ export const RHCampaigns: React.FC = () => {
       )}
 
       {/* View Campaign Details Modal */}
+      {/* View Campaign Details Modal */}
       {selectedCampaignForView && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+          <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[92vh] overflow-y-auto p-6 shadow-2xl border border-slate-100 space-y-5">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
-                <h3 className="font-bold text-slate-900 text-base">{selectedCampaignForView.name}</h3>
-                <p className="text-xs text-slate-500">Campagne Annuelle - {selectedCampaignForView.year}</p>
+                <h3 className="font-bold text-slate-900 text-base">Détails de la campagne : {selectedCampaignForView.name}</h3>
+                <p className="text-xs text-slate-500">Campagne {selectedCampaignForView.year} — dossier complet</p>
               </div>
-              <button onClick={() => setSelectedCampaignForView(null)} className="p-1 hover:bg-slate-100 rounded-lg">
+              <button onClick={() => { setSelectedCampaignForView(null); setSelectedManagerForCampaign(null); setSelectedEvaluationId(null); }} className="p-1 hover:bg-slate-100 rounded-lg">
                 <X className="w-5 h-5 text-slate-400" />
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 text-xs">
-              <div className="bg-slate-50 p-3 rounded-xl space-y-2 border border-slate-200">
-                <div className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">Calendrier & Deadlines</div>
-                <div><strong>Ouverture :</strong> {selectedCampaignForView.start_date}</div>
-                <div><strong>Deadline Auto-Eval :</strong> {selectedCampaignForView.auto_eval_deadline}</div>
-                <div><strong>Deadline Manager :</strong> {selectedCampaignForView.manager_eval_deadline}</div>
-                <div><strong>Validation DG :</strong> {selectedCampaignForView.dg_validation_deadline}</div>
-                <div><strong>Clôture Finale :</strong> {selectedCampaignForView.end_date}</div>
-              </div>
+            {selectedEvaluationId ? (
+              <CollaboratorDetailDossier
+                evaluationId={selectedEvaluationId}
+                readOnly
+                readOnlyContext="rh"
+                showGuidelines={false}
+                onBack={() => setSelectedEvaluationId(null)}
+              />
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div className="bg-slate-50 p-3 rounded-xl space-y-2 border border-slate-200">
+                    <div className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">Informations générales</div>
+                    <div><strong>Statut :</strong> {selectedCampaignForView.status.toUpperCase()}</div>
+                    <div><strong>Création :</strong> {selectedCampaignForView.created_at}</div>
+                    <div><strong>Ouverture :</strong> {selectedCampaignForView.start_date}</div>
+                    <div><strong>Clôture :</strong> {selectedCampaignForView.end_date}</div>
+                  </div>
 
-              <div className="bg-emerald-50/60 p-3 rounded-xl space-y-2 border border-emerald-200 text-emerald-900">
-                <div className="font-bold text-emerald-800 uppercase tracking-wider text-[10px]">Périmètre & Cible</div>
-                <div><strong>Statut :</strong> {selectedCampaignForView.status.toUpperCase()}</div>
-                <div><strong>Progression Global :</strong> {selectedCampaignForView.progress}%</div>
-                <div><strong>Collaborateurs Totaux :</strong> {selectedCampaignForView.total_collaborateurs}</div>
-                <div><strong>Filiales :</strong> {selectedCampaignForView.filiales?.join(', ') || 'Toutes'}</div>
-                <div><strong>Directions :</strong> {selectedCampaignForView.directions?.join(', ') || 'Toutes'}</div>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
-              <span className="font-bold text-slate-700">Description :</span>
-              <p className="text-slate-600 mt-1">{selectedCampaignForView.description}</p>
-            </div>
-
-            {selectedCampaignForView.regles_evaluations && (
-              <div className="bg-amber-50/70 p-3.5 rounded-xl border border-amber-200 text-xs space-y-1">
-                <span className="font-bold text-amber-900 block">Règles & Consignes de l'Évaluation :</span>
-                <p className="text-slate-800 whitespace-pre-line font-medium leading-relaxed">{selectedCampaignForView.regles_evaluations}</p>
-              </div>
-            )}
-
-            {selectedCampaignForView.managers_informes && selectedCampaignForView.managers_informes.length > 0 && (
-              <div className="bg-blue-50/70 p-3 rounded-xl border border-blue-200 text-xs space-y-1">
-                <span className="font-bold text-blue-900 block">Managers Informés :</span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {selectedCampaignForView.managers_informes.map(m => (
-                    <span key={m} className="px-2 py-0.5 bg-blue-100 text-blue-900 font-bold rounded text-[11px]">
-                      {m}
-                    </span>
-                  ))}
+                  <div className="bg-emerald-50/60 p-3 rounded-xl space-y-2 border border-emerald-200 text-emerald-900">
+                    <div className="font-bold text-emerald-800 uppercase tracking-wider text-[10px]">Tableau de bord campagne</div>
+                    <div><strong>Progression :</strong> {selectedCampaignForView.progress}%</div>
+                    <div><strong>Collaborateurs :</strong> {evaluations.filter(e => e.campagne_id === selectedCampaignForView.id).length}</div>
+                    <div><strong>Managers :</strong> {[...new Set(evaluations.filter(e => e.campagne_id === selectedCampaignForView.id).map(e => e.manager_name).filter(Boolean))].length}</div>
+                    <div><strong>Filiales :</strong> {selectedCampaignForView.filiales?.join(', ') || 'Toutes'}</div>
+                  </div>
                 </div>
-              </div>
-            )}
 
-            <div className="pt-2 flex justify-end">
-              <button
-                onClick={() => setSelectedCampaignForView(null)}
-                className="px-5 py-2 bg-slate-900 text-white font-bold text-xs rounded-lg hover:bg-slate-800"
-              >
-                Fermer
-              </button>
-            </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  <div className="bg-white p-3 rounded-xl border border-slate-200">
+                    <div className="font-bold text-slate-500 uppercase text-[10px]">Population</div>
+                    <div className="mt-2 text-slate-700">Collaborateurs : <strong>{getCampaignEvaluations(selectedCampaignForView.id).length}</strong></div>
+                    <div className="text-slate-700">Managers : <strong>{[...new Set(getCampaignEvaluations(selectedCampaignForView.id).map(e => e.manager_name).filter(Boolean))].length}</strong></div>
+                    <div className="text-slate-700">DG concernés : <strong>{selectedCampaignForView.total_dgs || '-'}</strong></div>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-slate-200">
+                    <div className="font-bold text-slate-500 uppercase text-[10px]">Évaluations</div>
+                    <div className="mt-2 text-slate-700">Finalisées : <strong>{getCampaignEvaluations(selectedCampaignForView.id).filter(e => ['valide', 'validee'].includes(e.status)).length}</strong></div>
+                    <div className="text-slate-700">En cours : <strong>{getCampaignEvaluations(selectedCampaignForView.id).filter(e => !['valide', 'validee'].includes(e.status)).length}</strong></div>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-slate-200">
+                    <div className="font-bold text-slate-500 uppercase text-[10px]">Exports DRH</div>
+                    <div className="mt-3 flex gap-2">
+                      <button onClick={() => exportCampaignDetails(selectedCampaignForView, 'pdf')} className="px-3 py-2 rounded-lg bg-slate-900 text-white font-bold text-[11px]">Exporter PDF</button>
+                      <button onClick={() => exportCampaignDetails(selectedCampaignForView, 'excel')} className="px-3 py-2 rounded-lg bg-emerald-800 text-white font-bold text-[11px]">Exporter Excel</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                  <span className="font-bold text-slate-700">Description :</span>
+                  <p className="text-slate-600 mt-1">{selectedCampaignForView.description}</p>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 text-xs">
+                  <h4 className="font-bold text-sm text-slate-900 mb-3">Historique de la campagne</h4>
+                  <div className="space-y-2 text-slate-600">
+                    <div>Création : {selectedCampaignForView.created_at || 'Non renseignée'}</div>
+                    <div>Lancement : {selectedCampaignForView.status !== 'brouillon' ? selectedCampaignForView.start_date : 'Non lancée'}</div>
+                    <div>Clôture prévue : {selectedCampaignForView.end_date || 'Non renseignée'}</div>
+                    <div>Notifications : les collaborateurs, managers et DG concernés sont informés lors du lancement.</div>
+                    <div>Validations : consultables dans le dossier de chaque collaborateur.</div>
+                    <div>Exports : disponibles dans cette page pour le DRH.</div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900">Managers participant à cette campagne</h4>
+                      <p className="text-[11px] text-slate-500">Sélectionnez un manager pour afficher uniquement ses collaborateurs.</p>
+                    </div>
+                  </div>
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 text-slate-600 uppercase text-[10px]">
+                      <tr><th className="p-3">Manager</th><th className="p-3">Famille</th><th className="p-3">Collaborateurs</th><th className="p-3 text-right">Action</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {([...new Map(evaluations.filter(e => e.campagne_id === selectedCampaignForView.id).map(e => [e.manager_name, e])).values()] as Evaluation[]).map(managerEval => {
+                        const managerCollaborators = evaluations.filter(e => e.campagne_id === selectedCampaignForView.id && e.manager_name === managerEval.manager_name);
+                        return (
+                          <React.Fragment key={managerEval.manager_name}>
+                            <tr className={selectedManagerForCampaign === managerEval.manager_name ? 'bg-emerald-50/60' : ''}>
+                              <td className="p-3 font-bold text-slate-900">{managerEval.manager_name}</td>
+                              <td className="p-3 text-slate-600">{managerEval.direction_name}</td>
+                              <td className="p-3 font-semibold">{managerCollaborators.length}</td>
+                              <td className="p-3 text-right">
+                                <button onClick={() => setSelectedManagerForCampaign(selectedManagerForCampaign === managerEval.manager_name ? null : managerEval.manager_name)} className="px-3 py-1.5 rounded-lg bg-emerald-800 text-white font-bold text-[11px]">
+                                  {selectedManagerForCampaign === managerEval.manager_name ? 'Masquer les collaborateurs' : 'Voir les collaborateurs'}
+                                </button>
+                              </td>
+                            </tr>
+                            {selectedManagerForCampaign === managerEval.manager_name && managerCollaborators.map(collab => (
+                              <tr key={collab.id} className="bg-white">
+                                <td className="p-3 pl-8 text-slate-700">{collab.user_name}</td>
+                                <td className="p-3 text-slate-600">{collab.poste_name} — {collab.direction_name}</td>
+                                <td className="p-3"><span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">{collab.status}</span></td>
+                                <td className="p-3 text-right">
+                                  <button onClick={() => setSelectedEvaluationId(collab.id)} className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 font-bold text-[11px] hover:bg-slate-50">
+                                    Voir le dossier
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -944,4 +1038,5 @@ export const RHCampaigns: React.FC = () => {
     </div>
   );
 };
+
 

@@ -69,10 +69,7 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
   const validatedEvals = evaluations.filter(e => e.status === 'valide' || e.status === 'validee');
 
   const handleValidate = async (id: number) => {
-    const evaluation = evaluations.find(item => item.id === id);
-    const confirmationMessage = evaluation?.status === 'signee'
-      ? 'Valider définitivement cette évaluation annuelle ?'
-      : "Valider le contenu de cette évaluation et la transmettre au collaborateur pour signature ?";
+    const confirmationMessage = "Valider le contenu de cette évaluation ?";
     if (confirm(confirmationMessage)) {
       await apiClient.validateEvaluationByDG(id);
       loadPendingEvaluations();
@@ -147,7 +144,7 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-1">
-          <div className="text-xs font-bold text-slate-500 uppercase">Validés définitivement</div>
+          <div className="text-xs font-bold text-slate-500 uppercase">Contenus validés par la DG</div>
           <div className="text-3xl font-black text-emerald-800">{validatedEvals.length} <span className="text-xs font-normal text-slate-400">dossier(s)</span></div>
         </div>
 
@@ -236,7 +233,7 @@ export const DGView: React.FC<DGViewProps> = ({ currentUser, initialTab, onNavig
                         className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow flex items-center space-x-1.5"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>{ev.status === 'signee' ? 'Valider définitivement' : 'Valider le contenu'}</span>
+                        <span>Valider le contenu</span>
                       </button>
                     </div>
                   </div>

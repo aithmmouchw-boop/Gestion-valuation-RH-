@@ -54,9 +54,14 @@ export const RHDashboard: React.FC = () => {
   };
 
   const handleRelaunchAll = async () => {
+    const campaignId = selectedCampaignForProgress?.id || activeCampaign?.id;
+    if (!campaignId) {
+      alert('Aucune campagne active ou sélectionnée pour effectuer la relance.');
+      return;
+    }
     setRelaunchingManager('ALL');
     try {
-      const res = await apiClient.relaunchCampaign(1);
+      const res = await apiClient.relaunchCampaign(campaignId);
       setRelaunchSuccess(res.message || "Relance générale transmise à tous les managers !");
       setTimeout(() => setRelaunchSuccess(null), 5000);
       loadData();

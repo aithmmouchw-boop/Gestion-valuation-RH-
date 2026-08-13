@@ -110,14 +110,14 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
       setFormError('Ajoutez un commentaire ou une justification pour chaque critère avant de valider.');
       return;
     }
-    if ((Object.keys(selfReview) as Array<keyof typeof selfReview>).some(field => !selfReview[field].trim())) {
-      setFormError("Complétez le bilan de l'année, les réalisations, les difficultés et les aspirations avant de valider.");
+    if (!selfReview.balance.trim() || !selfReview.achievements.trim() || !selfReview.difficulties.trim()) {
+      setFormError('Complétez les points forts, les points à améliorer et le développement à envisager avant de valider.');
       return;
     }
     try {
       setFormError('');
       setSubmittingAutoEval(true);
-      const result = await apiClient.submitAutoEvaluation(evaluation.id, { ...selfReview, ratings, comments: ratingComments });
+      const result = await apiClient.submitAutoEvaluation(evaluation.id, { ...selfReview, aspirations: selfReview.aspirations || '-', ratings, comments: ratingComments });
       setEvaluation(result.evaluation);
       setIsSubmitted(true);
       setFormMessage(`Votre fiche a été validée et envoyée automatiquement à ${evaluation.manager_name}.`);
@@ -130,7 +130,7 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
 
   const handleSign = async () => {
     if (!evaluation) return;
-    if (!['dg_validee', 'correction_a_confirmer'].includes(evaluation.status)) {
+    if (!['dg_validee', 'validee', 'correction_a_confirmer'].includes(evaluation.status)) {
       alert("Votre évaluation n'est pas encore disponible pour signature.");
       return;
     }
@@ -374,29 +374,6 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                   <strong className="block mt-1">Progression : {Object.keys(ratings).filter(id => evaluation.competences.some(item => String(item.id) === id)).length} / {evaluation.competences.length} critères cochés.</strong>
                 </div>
 
-                <section className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
-                  <h3 className="font-black text-sm text-slate-900">Votre bilan professionnel</h3>
-                  {([
-                    ['balance', "1. Bilan de l'Année", "Présentez votre bilan général de l'année..."],
-                    ['achievements', '2. Réalisations Clés', 'Décrivez vos principales réalisations...'],
-                    ['difficulties', '3. Difficultés Rencontrées', 'Indiquez les difficultés rencontrées...'],
-                    ['aspirations', '4. Aspirations Professionnelles', 'Précisez vos souhaits d’évolution et aspirations...'],
-                  ] as const).map(([field, label, placeholder]) => (
-                    <div key={field}>
-                      <label className="mb-1.5 block font-bold text-slate-900">{label} *</label>
-                      <textarea
-                        rows={3}
-                        value={selfReview[field]}
-                        onChange={event => { setSelfReview(current => ({ ...current, [field]: event.target.value })); setFormError(''); }}
-                        placeholder={placeholder}
-                        className={`w-full rounded-xl border bg-white p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 ${formError && !selfReview[field].trim() ? 'border-rose-400' : 'border-slate-300'}`}
-                        required
-                        disabled={isSubmitted}
-                      />
-                    </div>
-                  ))}
-                </section>
-
                 {(['savoir', 'savoir_faire', 'savoir_etre', 'autres'] as const).map(axis => {
                   const axisItems = evaluation?.competences.filter(competence => normalizeAxis(competence.axe) === axis) || [];
                   if (axisItems.length === 0) return null;
@@ -444,6 +421,28 @@ export const CollaborateurView: React.FC<CollaborateurViewProps> = ({ currentUse
                     </section>
                   );
                 })}
+
+                <section className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+                  <h3 className="font-black text-sm text-slate-900">Synthèse de votre auto-évaluation</h3>
+                  {([
+                    ['balance', '1. Points forts', 'Indiquez au minimum 3 points forts observés pendant la période évaluée.'],
+                    ['achievements', '2. Points à améliorer', 'Indiquez au minimum 3 points à améliorer.'],
+                    ['difficulties', '3. Développement à envisager', 'Précisez les formations, évolutions ou accompagnements à envisager.'],
+                  ] as const).map(([field, label, placeholder]) => (
+                    <div key={field}>
+                      <label className="mb-1.5 block font-bold text-slate-900">{label} *</label>
+                      <textarea
+                        rows={3}
+                        value={selfReview[field]}
+                        onChange={event => { setSelfReview(current => ({ ...current, [field]: event.target.value })); setFormError(''); }}
+                        placeholder={placeholder}
+                        className={`w-full rounded-xl border bg-white p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 ${formError && !selfReview[field].trim() ? 'border-rose-400' : 'border-slate-300'}`}
+                        required
+                        disabled={isSubmitted}
+                      />
+                    </div>
+                  ))}
+                </section>
 
             <div className="pt-2 flex justify-end">
               <button

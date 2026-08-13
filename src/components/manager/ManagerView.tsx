@@ -16,6 +16,7 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [campaigns, setCampaigns] = useState<Campagne[]>([]);
   const [selectedEvalId, setSelectedEvalId] = useState<number | null>(null);
+  const [selectedInitialTab, setSelectedInitialTab] = useState<'resume' | 'savoir'>('resume');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -62,8 +63,10 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
         evaluationId={selectedEvalId}
         readOnly={['valide', 'validee'].includes(evaluations.find(evaluation => evaluation.id === selectedEvalId)?.status || '')}
         readOnlyContext="dg"
+        initialTab={selectedInitialTab}
         onBack={() => {
           setSelectedEvalId(null);
+          setSelectedInitialTab('resume');
           loadTeamEvaluations();
         }}
       />
@@ -399,21 +402,30 @@ export const ManagerView: React.FC<ManagerViewProps> = ({ currentUser, initialTa
 
               <div className="flex flex-wrap items-center lg:justify-end gap-2">
                 <button
-                  onClick={() => setSelectedEvalId(ev.id)}
+                  onClick={() => {
+                    setSelectedInitialTab('resume');
+                    setSelectedEvalId(ev.id);
+                  }}
                   className="px-3 py-2 bg-slate-900 hover:bg-emerald-900 text-white font-bold text-xs rounded-lg transition-all flex items-center justify-center space-x-2 group"
                 >
                   <span>Voir le dossier</span>
                   <ArrowRight className="w-4 h-4 text-emerald-400 group-hover:translate-x-1 transition-transform" />
                 </button>
                 <button
-                  onClick={() => setSelectedEvalId(ev.id)}
+                  onClick={() => {
+                    setSelectedInitialTab(ev.interview_status === 'realise' ? 'savoir' : 'resume');
+                    setSelectedEvalId(ev.id);
+                  }}
                   disabled={['valide', 'validee'].includes(ev.status)}
                   className="px-3 py-2 bg-amber-100 hover:bg-amber-200 disabled:bg-slate-100 disabled:text-slate-400 text-amber-900 font-bold text-xs rounded-lg transition-colors"
                 >
                   {ev.score_global > 0 ? "Modifier l'évaluation" : "Commencer l'évaluation"}
                 </button>
                 <button
-                  onClick={() => setSelectedEvalId(ev.id)}
+                  onClick={() => {
+                    setSelectedInitialTab('resume');
+                    setSelectedEvalId(ev.id);
+                  }}
                   disabled={['valide', 'validee'].includes(ev.status)}
                   className="px-3 py-2 bg-blue-50 hover:bg-blue-100 disabled:bg-slate-100 disabled:text-slate-400 text-blue-900 font-bold text-xs rounded-lg transition-colors"
                 >

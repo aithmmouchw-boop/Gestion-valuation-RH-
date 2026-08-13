@@ -5,7 +5,7 @@ import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
 import { CollaboratorDetailDossier } from '../manager/CollaboratorDetailDossier';
 import { 
   Plus, Search, Filter, Play, CheckCircle, Archive, 
-  Eye, Edit3, Calendar, AlertCircle, Download, FileSpreadsheet, X, Bell, Trash2
+  Eye, Edit3, Calendar, AlertCircle, Download, FileSpreadsheet, X, Bell, Trash2, Loader2
 } from 'lucide-react';
 
 export const RHCampaigns: React.FC = () => {
@@ -19,6 +19,8 @@ export const RHCampaigns: React.FC = () => {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [selectedManagerForCampaign, setSelectedManagerForCampaign] = useState<string | null>(null);
   const [selectedEvaluationId, setSelectedEvaluationId] = useState<number | null>(null);
+  const [launchingCampaignId, setLaunchingCampaignId] = useState<number | null>(null);
+  const [launchingFromModal, setLaunchingFromModal] = useState(false);
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
@@ -69,13 +71,20 @@ export const RHCampaigns: React.FC = () => {
   const departments = [...new Set(platformUsers.map(user => user.direction_name).filter(Boolean))];
 
   const handleLaunch = async (id: number) => {
+    if (launchingCampaignId) return;
     if (confirm('Êtes-vous sûr de vouloir lancer cette campagne ? Des notifications automatiques seront envoyées à tous les managers concernés.')) {
+      setLaunchingCampaignId(id);
+      setCampaigns(prev => prev.map(campaign => campaign.id === id ? { ...campaign, status: 'ouverte' as CampagneStatus } : campaign));
       try {
         const result = await apiClient.launchCampaign(id);
         showToast(result.message || 'Campagne lancée avec succès.');
-        loadCampaigns();
+        apiClient.getCampaigns().then(setCampaigns).catch(() => loadCampaigns());
+        apiClient.getEvaluations().then(setEvaluations).catch(() => undefined);
       } catch (error: any) {
         showToast(error.message || 'Impossible de lancer la campagne.');
+        loadCampaigns();
+      } finally {
+        setLaunchingCampaignId(null);
       }
     }
   };
@@ -170,19 +179,25 @@ export const RHCampaigns: React.FC = () => {
 
   const handleLaunchFromModal = async () => {
     if (!validateDates()) return;
+    if (launchingFromModal) return;
+    setLaunchingFromModal(true);
     try {
       const created = await apiClient.createCampaign({ ...formData, status: 'brouillon' });
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Casablanca' });
       if (formData.start_date <= today) {
+        setCampaigns(prev => [{ ...created, status: 'ouverte' as CampagneStatus }, ...prev]);
         await apiClient.launchCampaign(created.id);
         showToast('Campagne lancée et utilisateurs informés.');
       } else {
         showToast(`Campagne planifiée : lancement automatique le ${formData.start_date}.`);
       }
       setShowModal(false);
-      loadCampaigns();
+      apiClient.getCampaigns().then(setCampaigns).catch(() => loadCampaigns());
+      apiClient.getEvaluations().then(setEvaluations).catch(() => undefined);
     } catch (error: any) {
       showToast(error.message || 'Impossible de créer ou lancer la campagne.');
+    } finally {
+      setLaunchingFromModal(false);
     }
   };
 
@@ -406,10 +421,11 @@ export const RHCampaigns: React.FC = () => {
                         {c.status === 'brouillon' && (
                           <button
                             onClick={() => handleLaunch(c.id)}
-                            className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors font-bold"
-                            title="Lancer la campagne"
+                            disabled={launchingCampaignId === c.id}
+                            className="p-1.5 text-emerald-700 hover:bg-emerald-50 disabled:text-slate-400 disabled:bg-slate-50 rounded-md transition-colors font-bold"
+                            title={launchingCampaignId === c.id ? 'Lancement en cours' : 'Lancer la campagne'}
                           >
-                            <Play className="w-4 h-4" />
+                            {launchingCampaignId === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                           </button>
                         )}
 
@@ -764,11 +780,15 @@ export const RHCampaigns: React.FC = () => {
                 ) : (
                   <button
                     onClick={handleLaunchFromModal}
-                    className="px-5 py-2 bg-emerald-800 text-white font-bold text-xs rounded-lg hover:bg-emerald-900 shadow-md"
+                    disabled={launchingFromModal}
+                    className="px-5 py-2 bg-emerald-800 text-white font-bold text-xs rounded-lg hover:bg-emerald-900 disabled:bg-slate-400 shadow-md flex items-center gap-2"
                   >
-                    {formData.start_date > new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Casablanca' })
+                    {launchingFromModal && <Loader2 className="w-4 h-4 animate-spin" />}
+                    <span>{launchingFromModal
+                      ? 'Traitement en cours...'
+                      : formData.start_date > new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Casablanca' })
                       ? 'Planifier la campagne'
-                      : 'Lancer la campagne'}
+                      : 'Lancer la campagne'}</span>
                   </button>
                 )}
               </div>

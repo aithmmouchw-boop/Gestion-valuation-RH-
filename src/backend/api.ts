@@ -1116,7 +1116,7 @@ export function setupApiRoutes(app: Express) {
     const { action, comment } = req.body; // action: 'valider' | 'renvoyer'
 
     if (action === 'valider') {
-      evaluation.status = 'valide';
+      evaluation.status = 'dg_validee';
       evaluation.validated_at_dg = new Date().toISOString().split('T')[0];
       evaluation.dg_comment = comment || 'Validé par la Direction Générale';
       const rhRecipients = currentUsers.filter(user => user.role === 'rh').map(user => user.id);
@@ -1124,10 +1124,10 @@ export function setupApiRoutes(app: Express) {
       finalRecipients.forEach(userId => currentNotifications.unshift({
         id: currentNotifications.length + 1,
         user_id: userId,
-        title: 'Evaluation validee definitivement',
-        message: `L evaluation de ${evaluation.user_name} a ete validee definitivement par la Direction Generale. Le processus est termine.`,
+        title: 'Contenu de l evaluation valide par la DG',
+        message: `Le contenu de l evaluation de ${evaluation.user_name} a ete valide par la Direction Generale. La validation finale revient au collaborateur par signature.`,
         read: false,
-        type: 'evaluation_validated',
+        type: 'dg_content_validated',
         created_at: new Date().toISOString().split('T')[0]
       }));
     } else {
@@ -1185,11 +1185,12 @@ export function setupApiRoutes(app: Express) {
   });
 
   app.get('/api/notifications/config', (_req: Request, res: Response) => {
+    currentNotificationsConfig = currentNotificationsConfig.map(item => ({ ...item, enabled: true }));
     res.json(currentNotificationsConfig);
   });
 
   app.put('/api/notifications/config', (req: Request, res: Response) => {
-    currentNotificationsConfig = req.body;
+    currentNotificationsConfig = req.body.map((item: any) => ({ ...item, enabled: true }));
     res.json({ message: 'Configuration mise à jour', config: currentNotificationsConfig });
   });
 

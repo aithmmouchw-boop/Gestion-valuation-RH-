@@ -17,6 +17,30 @@ export const clearAuthToken = () => {
 
 export const getAuthToken = () => authToken;
 
+const parseApiResponse = (text: string) => {
+  const clean = text.trim();
+  if (!clean) return {};
+  try {
+    return JSON.parse(clean);
+  } catch {
+    const firstObject = clean.indexOf('{');
+    const firstArray = clean.indexOf('[');
+    const startCandidates = [firstObject, firstArray].filter(index => index >= 0);
+    const start = startCandidates.length ? Math.min(...startCandidates) : -1;
+    if (start < 0) throw new Error(clean);
+
+    for (let end = clean.length; end > start; end -= 1) {
+      const candidate = clean.slice(start, end).trim();
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        // Continue until the valid JSON fragment is found.
+      }
+    }
+    throw new Error(clean);
+  }
+};
+
 const fetchApi = async (endpoint: string, options: RequestInit = {}) => {
   const headers = {
     'Content-Type': 'application/json',
@@ -25,11 +49,12 @@ const fetchApi = async (endpoint: string, options: RequestInit = {}) => {
   };
 
   const response = await fetch(endpoint, { ...options, headers });
+  const responseText = await response.text();
+  const data = parseApiResponse(responseText);
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `Erreur API: ${response.statusText}`);
+    throw new Error(data.error || `Erreur API: ${response.statusText}`);
   }
-  return response.json();
+  return data;
 };
 
 export const apiClient = {
@@ -306,6 +331,10 @@ export const apiClient = {
       method: 'PUT',
       body: JSON.stringify(config)
     });
+  },
+
+  sendTestEmail: async (): Promise<{ message: string }> => {
+    return fetchApi('/api/mail/test', { method: 'POST' });
   },
 
   getAuditLogs: async (): Promise<AuditLog[]> => {

@@ -10,6 +10,7 @@ interface CollaboratorDetailDossierProps {
   readOnly?: boolean;
   readOnlyContext?: 'dg' | 'rh';
   showGuidelines?: boolean;
+  initialTab?: 'resume' | 'auto_eval' | 'savoir' | 'savoir_faire' | 'savoir_etre' | 'besoins' | 'objectifs' | 'ameliorations' | 'historique';
 }
 
 const ratingPercentages: Record<string, string> = {
@@ -22,10 +23,11 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
   readOnly = false,
   readOnlyContext = 'dg',
   showGuidelines = true,
+  initialTab = 'resume',
 }) => {
   const defaultObjectiveDate = `${new Date().getFullYear()}-12-31`;
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
-  const [activeTab, setActiveTab] = useState<'resume' | 'auto_eval' | 'savoir' | 'savoir_faire' | 'savoir_etre' | 'besoins' | 'objectifs' | 'ameliorations' | 'historique'>('resume');
+  const [activeTab, setActiveTab] = useState<'resume' | 'auto_eval' | 'savoir' | 'savoir_faire' | 'savoir_etre' | 'besoins' | 'objectifs' | 'ameliorations' | 'historique'>(initialTab);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -50,6 +52,9 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
     setLoading(true);
     apiClient.getEvaluationDetail(evaluationId).then(res => {
       setEvaluation(res);
+      setInterviewDate(res.interview_date ? res.interview_date.replace(' ', 'T').slice(0, 16) : '');
+      setInterviewMessage(res.interview_message || 'Reunion pour discuter ensemble de votre auto-evaluation annuelle.');
+      setInterviewStatus((res.interview_status as 'planifie' | 'realise' | 'reporte' | 'annule') || 'planifie');
       setLoading(false);
     }).catch(console.error);
   };
@@ -229,6 +234,9 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
       const result = await apiClient.scheduleInterview(evaluation.id, interviewDate, interviewMessage, interviewStatus);
       setEvaluation(result.evaluation);
       setSuccessMessage(result.message);
+      if (interviewStatus === 'realise') {
+        setActiveTab('savoir');
+      }
       setTimeout(() => setSuccessMessage(''), 4000);
     } finally {
       setIsSaving(false);
@@ -408,7 +416,7 @@ export const CollaboratorDetailDossier: React.FC<CollaboratorDetailDossierProps>
             </div>
           )}
 
-          {!readOnly && evaluation.auto_evaluation && (
+          {!readOnly && (
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 space-y-3">
               <div>
                 <h3 className="font-bold text-sm text-indigo-950">Entretien individuel avec {evaluation.user_name}</h3>

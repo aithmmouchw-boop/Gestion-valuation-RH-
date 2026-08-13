@@ -8,11 +8,11 @@ export const RHNotificationsConfig: React.FC = () => {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    apiClient.getNotificationConfig().then(setConfigList).catch(console.error);
+    apiClient.getNotificationConfig().then(config => setConfigList(config.map(item => ({ ...item, enabled: true })))).catch(console.error);
   }, []);
 
   const handleToggle = (id: string) => {
-    setConfigList(prev => prev.map(item => item.id === id ? { ...item, enabled: !item.enabled } : item));
+    setConfigList(prev => prev.map(item => item.id === id ? { ...item, enabled: true } : item));
   };
 
   const handleFrequencyChange = (id: string, freq: string) => {
@@ -20,7 +20,7 @@ export const RHNotificationsConfig: React.FC = () => {
   };
 
   const handleSave = async () => {
-    await apiClient.updateNotificationConfig(configList);
+    await apiClient.updateNotificationConfig(configList.map(item => ({ ...item, enabled: true })));
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -79,6 +79,7 @@ export const RHNotificationsConfig: React.FC = () => {
               {/* Toggle Switch */}
               <button
                 onClick={() => handleToggle(item.id)}
+                title="Toutes les notifications sont activées"
                 className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
                   item.enabled ? 'bg-emerald-800' : 'bg-slate-300'
                 }`}
